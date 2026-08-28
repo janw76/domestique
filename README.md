@@ -317,6 +317,19 @@ only thing that lifts the default check-in-between-beads rule (see
 skill cannot be invoked implicitly. On Claude, `/drain <epic-id>` is an
 alias of `/goal <epic-id>`.
 
+**Decompose has two optional feedback loops, both auto-detected.** Before
+creating the epic, it checks the session for a grilling skill (`grilling` or
+`grill-me`, plain or plugin-namespaced) and, if found, runs a
+one-question-at-a-time interview until shared understanding is confirmed
+before creating the epic; otherwise it prints a one-line notice and proceeds
+straight to epic creation. After the epic, tasks, and dependencies are
+wired, it likewise
+checks for a ponytail-audit skill and, if found, runs it once against the
+fresh task graph, auto-applies the findings (delete/merge/rewire beads), and
+reports the applied/rejected delta; otherwise it prints a one-line notice and
+presents the first decomposition directly. Neither skill is required —
+decompose works unchanged without either installed.
+
 **Authorization is scoped and temporary.** A goal invocation is
 the sole thing that authorizes continuous, unattended dispatch — and only
 across that epic's beads. It expires the instant the epic completes or any
