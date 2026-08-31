@@ -133,6 +133,8 @@ scenario_fresh_install() {
   check "decompose.md has grilling fallback notice" grep -q 'No grilling skill installed' "$t/.claude/commands/decompose.md"
   check "decompose.md has ponytail-audit fallback notice" grep -q 'No ponytail-audit skill found' "$t/.claude/commands/decompose.md"
   check "decompose.md requires full task title in dispatch table" grep -qF 'full task title' "$t/.claude/commands/decompose.md"
+  check "decompose.md requires full epic title heading" grep -qF 'full epic title' "$t/.claude/commands/decompose.md"
+  check "decompose.md requires verbatim titles" grep -qF 'verbatim' "$t/.claude/commands/decompose.md"
   check "base snapshot for implementer.md written" test -f "$t/$BASE_IMPL_REL"
   check "base snapshot for reviewer.md written" test -f "$t/.claude/.domestique/base/.claude/agents/reviewer.md"
   check "base snapshot for decompose.md written" test -f "$t/.claude/.domestique/base/.claude/commands/decompose.md"

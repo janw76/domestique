@@ -156,6 +156,8 @@ scenario_fresh_normal_codex() {
   check "decompose skill has grilling fallback notice" grep -q 'No grilling skill installed' "$t/$DECOMPOSE_SKILL_REL"
   check "decompose skill has ponytail-audit fallback notice" grep -q 'No ponytail-audit skill found' "$t/$DECOMPOSE_SKILL_REL"
   check "decompose skill requires full task title in dispatch table" grep -qF 'full task title' "$t/$DECOMPOSE_SKILL_REL"
+  check "decompose skill requires full epic title heading" grep -qF 'full epic title' "$t/$DECOMPOSE_SKILL_REL"
+  check "decompose skill requires verbatim titles" grep -qF 'verbatim' "$t/$DECOMPOSE_SKILL_REL"
   check "goal skill created" test -f "$t/$GOAL_SKILL_REL"
   check "goal metadata created" test -f "$t/$GOAL_META_REL"
   check "no CLAUDE.md" test ! -e "$t/CLAUDE.md"
