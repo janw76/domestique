@@ -53,8 +53,21 @@ matches what it's for:
 ### Orchestrator
 
 Your main Claude Code or Codex session, on a strong planning model. Decomposes goals
-into beads, claims and dispatches one bead at a time, adjudicates the
-reviewer's verdict against the implementer's report, and decides what's next.
+into beads, claims and dispatches up to 2 eligible beads per batch — each to
+an implementer in its own git worktree — adjudicates the reviewer's verdict
+against the implementer's report, and decides what's next. A second bead only
+joins a batch when all five eligibility rules hold:
+
+- both beads are ready per `bd ready`, and neither depends on the other
+- their `Files:` sets are disjoint — a bead with a missing or `unknown`
+  `Files:` is never paired
+- neither touches shared infrastructure: build config, test harness, schema,
+  lockfiles, CI
+- the orchestrator records a one-line low-interference justification (no
+  shared symbols, no API one consumes that the other changes, no ordering
+  assumption)
+- neither bead is labeled `model:opus`
+
 Writes code itself only for trivial one-liners — it's reserved for the
 judgment-heavy work, where mistakes are expensive.
 
@@ -63,7 +76,9 @@ judgment-heavy work, where mistakes are expensive.
 The `implementer` subagent, on a fast, efficient model. Receives one bounded task,
 claims it and marks it in progress, does exactly that, runs the tests/linter,
 and returns a terse summary. It does **not** close its own bead — the
-orchestrator closes beads after the reviewer passes them.
+orchestrator closes beads after the reviewer passes them. It works inside its
+own git worktree and may only touch the paths listed in its bead's `Files:`
+section.
 
 ### Reviewer
 
@@ -74,7 +89,26 @@ NEEDS-WORK verdict judged against the bead's done-criteria — a stronger,
 non-peer check than the implementer. It reviews only — it never edits code or
 touches bead state. In Codex, the orchestrator fingerprints tracked and staged
 changes plus bead state before and after review; any reviewer-introduced delta
-is a failed review and an immediate stop.
+is a failed review and an immediate stop. In Claude Code, the reviewer runs inside the implementer's
+worktree and fails the bead if any change falls outside the `Files:`
+section.
+
+### Parallel batches
+
+`/decompose` writes a `Files:` and `Shared-infra:` line into each bead's
+description, declaring which paths a task will touch and whether it depends
+on shared build config, test harness, schema, lockfiles, or CI. The
+orchestrator only pairs two beads in a batch when their `Files:` sets are
+disjoint, neither is flagged `Shared-infra: yes`, and it can write a one-line
+low-interference justification for the pair. Disjoint files alone aren't
+sufficient — two beads can still conflict through a shared abstraction or an
+ordering dependency the file list doesn't capture, which is why the
+low-interference judgment call sits on top of the mechanical disjointness
+check. Every bead runs in its own git worktree, even a solo bead in a batch
+of one, so worktree isolation is the default flow rather than a
+parallel-only special case. The CLAUDE.md policy block that domestique
+installs is the source of truth for the eligibility rules and the worktree
+flow; this README only summarizes it.
 
 Each subagent has a platform-native model pin: Claude frontmatter uses
 `model: sonnet` and `model: opus`; Codex TOML uses `gpt-5.6-terra` with
@@ -316,7 +350,10 @@ the active root AGENTS file. Nothing is auto-migrated. Passing `--guest` and
 ## Unattended epic mode
 
 Claude uses `/decompose` and `/goal <epic-id>`; Codex uses
-`$domestique-decompose` and `$domestique-goal <epic-id>`. The goal workflow
+`$domestique-decompose` and `$domestique-goal <epic-id>`. The Codex loop
+stays strictly sequential — one bead at a time; parallel batches with
+worktree isolation (see [Parallel batches](#parallel-batches), above) are a
+Claude-only feature. The goal workflow
 drains one beads epic to
 completion by repeatedly running the implementer → reviewer loop **without
 stopping between beads**. The platform's explicit goal invocation is the
@@ -347,12 +384,16 @@ session.
 **Safety comes from branch isolation and the same invariants, held harder.**
 Before touching anything, the orchestrator creates or switches to a dedicated epic
 branch (e.g. `epic/<epic-id>`) and never commits to the default branch for
-the rest of the run — it never merges or pushes that branch either; that's
-yours to do (see below). Within the run, the core invariants still hold:
-one bead in flight at a time, one commit per bead (never batched), and never
-close a bead the reviewer didn't pass. A hard ceiling stops the run after 15
-beads closed in one go, even if the epic isn't finished, as a runaway-loop
-backstop rather than a target.
+the rest of the run. Every bead runs in its own git worktree; the
+orchestrator is the only merger, merging each worktree branch into the epic
+branch once its bead passes review — a merge conflict there is a stop
+condition, never auto-resolved. It never merges or pushes the epic branch
+itself; that's yours to do (see below). All tests run once on the epic
+branch after each batch lands. Within the run, the core invariants still
+hold: at most 2 beads in flight, only when eligible, one commit per bead
+(never batched), and never close a bead the reviewer didn't pass. A hard
+ceiling stops the run after 15 beads closed in one go, even if the epic
+isn't finished, as a runaway-loop backstop rather than a target.
 
 **Stop conditions halt the loop immediately** and hand control back to you:
 a bead failing review twice, any full-suite regression, a decision needing
