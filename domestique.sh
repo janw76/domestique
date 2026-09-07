@@ -167,7 +167,8 @@ Rules for a good decomposition:
 - Create one epic for the goal:
   `bd create "<goal>" -t epic -p 1 --description "<why + high-level design>"`
 - Break it into **bounded tasks** — each completable by a fresh Sonnet session in a single pass. A task has one clear deliverable and a testable done-criterion. If it needs more than that, split it.
-  `bd create "<task>" -t task -p <2-3> --parent <epic-id> --description "<input, output, done-criteria>"`
+  `bd create "<task>" -t task -p <2-3> --parent <epic-id> --description "Files: <paths>. Shared-infra: no. <input, output, done-criteria>"`
+- Every task description MUST begin with a `Files:` line listing the paths the task may touch, followed by a `Shared-infra: yes|no` line (yes when it touches build config, test harness, schema, lockfiles, or CI). If paths cannot be known at planning time write `Files: unknown`; such beads always run solo.
 - Wire real dependencies so `bd ready` only ever surfaces work that can actually start:
   `bd dep add <blocked-id> <blocker-id>`   # blocked depends on blocker
 - Keep `bd ready` crisp. No vague someday-items, no research-maybe tasks, nothing not immediately actionable. If it isn't ready to be worked, it doesn't belong in the graph yet.
@@ -175,6 +176,9 @@ Rules for a good decomposition:
 
 ## Model routing
 Label a task `model:opus` (bd create -l model:opus, or bd label add <id> model:opus) when ANY of: (1) foundational — it creates or reshapes what other beads build on (engine core, schema, public API, shared state model); (2) it has 2+ downstream dependents in the graph; (3) intricate logic — parsing, concurrency, state machines, edge-case-heavy algorithms; (4) cross-cutting refactor across many files. Everything else keeps the default (Sonnet). Never label epics — labels inherit to children. Sanity check: if every bead earns model:opus, the decomposition is too coarse — split until most beads are routine.
+
+## Parallel planning
+The orchestrator may run at most 2 beads at once. A pair qualifies only when: their `Files:` sets are disjoint, neither is `Shared-infra: yes`, neither is labeled `model:opus`, and neither depends on the other. When splitting work, prefer splits that give sibling beads disjoint `Files:` so they can pair; never split a single file's edit across two beads to fake disjointness.
 
 After the epic, tasks, and dependencies are created and wired, check available skills for a ponytail-audit skill (plain or plugin-namespaced, e.g. `ponytail:ponytail-audit`):
 - If present: invoke it with the freshly created epic (its task graph) as the audit target — hunting YAGNI beads, mergeable beads, speculative scaffolding, dependency over-wiring. Single pass only. Auto-apply the findings judged relevant (delete/merge/rewire beads), reject the rest, and include an audit delta (applied vs rejected, with reasons) in the final printout below.
