@@ -190,31 +190,36 @@ DOM_EOF
 
 emit_goal() { cat <<'DOM_EOF'
 ---
-description: Drain a beads epic to completion unattended — dedicated branch, one bead per commit, reviewer-gated, bounded loop.
+description: Drain a beads epic to completion unattended — dedicated branch, up to 2 beads per batch in isolated worktrees, one bead per commit, reviewer-gated, bounded loop.
 argument-hint: <epic-id>
 ---
 
-Drive epic $ARGUMENTS to completion, unattended, within the bounds below. This invocation is your explicit authorization to skip the normal "stop and report before dispatching the next task" rule from CLAUDE.md — but that authorization is scoped and time-limited: it covers only beads under epic $ARGUMENTS, and it expires the instant the epic completes or any stop condition below fires. It never carries to another epic or a later session. This command is also installed as `/drain` — an alias with identical semantics.
+Drive epic $ARGUMENTS to completion, unattended, within the bounds below. This invocation is your explicit authorization to skip the normal "stop and report before dispatching the next batch" rule from CLAUDE.md — but that authorization is scoped and time-limited: it covers only beads under epic $ARGUMENTS, and it expires the instant the epic completes or any stop condition below fires. It never carries to another epic or a later session. This command is also installed as `/drain` — an alias with identical semantics.
 
 ## Branch isolation (load-bearing)
-Before touching anything, create or switch to a dedicated branch for this epic (e.g. derived from `$ARGUMENTS`, such as `epic/$ARGUMENTS`). Never commit to the default branch for the rest of this run. The human reviews and merges this branch by hand — you never merge or push it. In guest installs (domestique installed with `--guest` into a repo you don't own), this is doubly true: unattended `/goal` commits stay on local branches that are never pushed.
+Before touching anything, create or switch to a dedicated branch for this epic (e.g. derived from `$ARGUMENTS`, such as `epic/$ARGUMENTS`). Never commit to the default branch for the rest of this run. Every bead runs in its own git worktree: the loop merges worktree branches into the epic branch only, and never merges the epic branch anywhere or pushes it. The human reviews and merges the epic branch by hand. In guest installs (domestique installed with `--guest` into a repo you don't own), this is doubly true: unattended `/goal` commits stay on local branches that are never pushed.
 
-## Per-cycle loop
-For each cycle:
-1. `bd ready` scoped to epic $ARGUMENTS — pick the highest-priority unblocked task. If none, the epic is done; go to Completion below.
-2. Assert a clean working tree before starting the bead. If it's dirty, stop and report — do not paper over it.
-3. Claim it and mark in_progress (`bd update <id> --claim`).
-4. Dispatch to the `implementer` subagent with a precise brief built from the bead's description, input/output, and done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on this dispatch, otherwise use the default (Sonnet).
-5. Dispatch to the `reviewer` subagent with the same bead id and its done-criteria. The reviewer must run the full test suite and inspect the real diff every time — never trust the implementer's summary in place of that.
-6. Adjudicate:
-   - Reviewer PASS → `git add -A` and commit, message including the bead id, one bead per commit (never batch). Then `bd close <id>`.
-   - Reviewer reports gaps → route at most one fix pass back to the implementer, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it.
+## Per-batch loop
+For each batch:
+1. `bd ready` scoped to epic $ARGUMENTS. If none are ready, the epic is done; go to Completion below.
+2. Pick the highest-priority unblocked bead. Add a second bead only if **all five Parallel eligibility rules from CLAUDE.md** hold — at most 2 beads in flight, never more. Write the one-line low-interference justification into the run log.
+3. Assert a clean working tree on the epic branch before starting the batch. If it's dirty, stop and report — do not paper over it.
+4. Claim every bead in the batch (`bd update <id> --claim`).
+5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet).
+6. Dispatch each `reviewer` subagent into its bead's worktree with the bead id and its done-criteria. The reviewer must run the full test suite and inspect the real diff every time — never trust the implementer's summary in place of that.
+7. Adjudicate per bead; the beads of a batch have independent fates:
+   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). Merge that worktree branch into the epic branch, remove the worktree, then `bd close <id>`.
+   - Reviewer reports gaps → route at most one fix pass back into the same worktree, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it.
+8. Once every bead of the batch has landed or stopped, run all tests on the epic branch.
+9. Next batch.
 
 ## Hard ceiling
-Stop and report after 15 beads closed in this run (or sooner if you judge the budget exhausted), even if the epic isn't finished. This is a runaway-loop backstop, not a target.
+Stop and report after 15 beads closed in this run (or sooner if you judge the budget exhausted), even if the epic isn't finished. Beads are counted, not batches. This is a runaway-loop backstop, not a target.
 
 ## Stop conditions — halt immediately, do not dispatch further work, and report to the human
-- A bead fails review twice: leave it `in_progress` with notes on what's wrong; do not force a third pass.
+- A bead fails review twice: leave it `in_progress` with notes on what's wrong and leave its worktree in place for the human; do not force a third pass.
+- A merge conflict while integrating a worktree branch into the epic branch: never auto-resolve it. Leave the worktree and its branch in place, and report both paths.
+- The post-batch full test run on the epic branch fails: stop immediately, do not attempt to attribute the cause yourself.
 - Any full-suite regression: stop immediately, do not attempt to attribute the cause yourself.
 - A decision needs operator input: spec ambiguity, scope change, or UX/semantics not already settled by the bead's description.
 - Anything requires a push, a config change, or touching files outside the project.
@@ -224,8 +229,9 @@ Stop and report after 15 beads closed in this run (or sooner if you judge the bu
 Run the full test suite once more. Summarize: beads closed, commits made (with ids), any follow-ups filed as beads, and residual risks that need human hands-on attention. Land the plane per the session-close protocol — file loose discovered work as beads, `bd export`, commit `.beads/`. Anything requiring push or merge authority is reported as a PROPOSED command for the human to run, never executed by you.
 
 ## Invariants — restate these to yourself at the end of the report
-- One bead in flight at a time.
+- At most 2 beads in flight, only when eligible.
 - One commit per bead, never batched.
+- Only the orchestrator merges, and never in parallel.
 - Never close a bead the reviewer didn't pass.
 - Never touch the default branch.
 DOM_EOF
@@ -425,7 +431,8 @@ Before work, require an epic id and create/switch to a dedicated epic branch.
 Never work on the default branch, merge, or push. Then repeat the sequential
 `$domestique` loop: one implementer, wait, fingerprint, one fresh reviewer,
 wait, fingerprint, adjudicate. One passing bead per commit; never close a bead
-the reviewer did not pass.
+the reviewer did not pass. The Codex loop stays strictly sequential;
+parallel batch dispatch is not available on this platform.
 
 Stop immediately for: two failed reviews of one bead, any full-suite
 regression, an operator decision, a required push/config/out-of-project write,
