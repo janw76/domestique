@@ -27,7 +27,7 @@ This session is the **orchestrator**. Your job is planning, delegation, and revi
 
 ## Roles
 - **You (main session, planning model):** decompose work, hold the plan, delegate implementation and review, adjudicate the results, decide what's next. Write code yourself only for trivial one-line edits.
-- **`implementer` subagent (Sonnet; a bead labeled model:opus routes that dispatch to Opus):** executes one bounded task at a time in its own context and reports back a summary.
+- **`implementer` subagent (Sonnet; a bead labeled model:opus routes that dispatch to Opus):** executes one bounded task at a time in its own context and reports back a summary. Each implementer runs in its own git worktree (Agent tool `isolation: "worktree"`) and may only touch the paths listed in its bead's `Files:` section.
 - **`reviewer` subagent (Opus):** independently verifies a completed task in a fresh context — inspects the real diff, reads the changed files, runs the tests — and reports a pass/fail verdict against the bead's done-criteria. A stronger, non-peer check than the implementer. Does not fix anything; reviewing is its only job.
 
 ## Work tracking: beads
@@ -43,23 +43,39 @@ Plans, bead descriptions, and delegation briefs are executed by a separate model
 - Flag ambiguities explicitly rather than resolving them silently.
 
 ## Delegation loop
-1. `bd ready` → pick the highest-priority unblocked task.
-2. Delegate it to the `implementer` subagent with a precise brief and the bead id. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on the implementer dispatch, otherwise use the default (Sonnet).
-3. When the implementer returns, delegate verification to the `reviewer` subagent with the same bead id and its done-criteria. The reviewer inspects the real diff, reads the changed files, and runs the tests in a fresh context — judging the work against the done-criteria, not against the implementer's summary — and returns a pass/fail verdict.
-4. Adjudicate. Weigh the reviewer's verdict against the implementer's summary: if they agree the work is done, close the bead and commit its changes (one commit, bead id in the message); if the reviewer reports gaps, reopen the bead or file a follow-up and route the fix back to the implementer. Read the diff yourself only when the two reports conflict or the verdict is ambiguous — delegating the review is the point.
-5. **Stop and report to the human before dispatching the next task.** Do not drain the queue unattended unless explicitly told to.
+1. `bd ready` → pick the highest-priority unblocked bead.
+2. If a second ready bead satisfies **all** of the eligibility rules below, dispatch it too — the cap is 2 beads in flight. Record the one-line low-interference justification in your report.
+3. Dispatch each implementer with `isolation: "worktree"`, a precise brief, and the bead id. Check `bd label list <id>` first; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet).
+4. When an implementer returns, dispatch the `reviewer` subagent into that same worktree with the bead id and its done-criteria. The reviewer inspects the real diff, reads the changed files, and runs the tests in a fresh context — judging the work against the done-criteria, not against the implementer's summary — and returns a pass/fail verdict.
+5. Adjudicate per bead; the beads of a batch have independent fates. Reviewer PASS: commit inside that worktree (one commit, bead id in the message), merge the worktree branch into the epic branch, then `bd close`. Reviewer reports gaps: route one fix pass back into the same worktree, then re-review; a second failure stops the batch. Read the diff yourself only when the two reports conflict or the verdict is ambiguous — delegating the review is the point.
+6. After every bead of the batch has landed, run all tests once on the epic branch.
+7. **Stop and report to the human before dispatching the next batch.** Do not drain the queue unattended unless explicitly told to.
+
+### Parallel eligibility (all must hold)
+1. Both beads are ready per `bd ready` and neither depends on the other.
+2. Their `Files:` sets are disjoint; a bead whose `Files:` section is missing or says `unknown` is never paired.
+3. Neither touches shared infrastructure: build config, test harness, schema, lockfiles, CI.
+4. You write a one-line low-interference justification — no shared symbols, no API one consumes that the other changes, no ordering assumption.
+5. Neither bead is labeled `model:opus`.
+
+### Worktree flow
+- Always a worktree, even for a solo bead.
+- The implementer never commits; the reviewer reviews inside the worktree.
+- You are the only merger, and you merge worktree branches sequentially.
+- A merge conflict is a stop condition — never auto-resolve one.
+- Remove the worktree after its branch is merged.
 
 ## Unattended epic mode (/goal)
-- The default remains **stop-and-report between beads** (rule 5 of the Delegation loop above). Nothing changes that by itself.
+- The default remains **stop-and-report between batches** (rule 7 of the Delegation loop above). Nothing changes that by itself.
 - A `/goal <epic-id>` invocation (or its alias `/drain <epic-id>`) is the **only** thing that authorizes continuous, unattended dispatch across an epic's beads. That authorization is scoped to the named epic, expires the instant the epic completes or any stop condition fires, and never carries over to another epic or a later session.
-- Unattended runs happen on a **dedicated epic branch** and never commit to the default branch — the human reviews and merges that branch by hand; the loop never merges or pushes.
-- The core invariants still hold even while unattended: **one bead in flight at a time, one commit per bead, and never close a bead the reviewer didn't pass.**
+- Unattended runs happen on a **dedicated epic branch** and never commit to the default branch — the human reviews and merges that branch by hand; the loop merges worktree branches into the epic branch only, and never merges the epic branch anywhere or pushes.
+- The core invariants still hold even while unattended: **at most 2 beads in flight, one commit per bead, and never close a bead the reviewer didn't pass.**
 - For the full loop mechanics and the complete list of stop conditions, see `.claude/commands/goal.md` — they are not restated here.
 
 ## Discipline
-- One task in flight at a time. Bounded WIP.
+- At most 2 beads in flight, and only when the eligibility rules hold. Bounded WIP.
 - Subagents return summaries, never full file dumps. Your context is the constraint — keep it lean, don't re-read large outputs.
-- Do not spawn agent teams for this sequential pipeline. Subagents only.
+- Do not spawn agent teams for this pipeline. Subagents only.
 DOM_EOF
   case "$mode" in
     guest)
