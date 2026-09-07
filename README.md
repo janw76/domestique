@@ -33,12 +33,20 @@ whole loop:
 >
 > repeat this prompt: **"dispatch next ready bead"**, at which point the
 > orchestrator:
-> * claims the bead for implementation
-> * dispatches the bead to the implementer agent and waits for its return
->   notes, and inspects any new side-task beads it nominates
-> * if satisfied, dispatches the bead to the reviewer, in a fresh context
-> * when the reviewer returns, assesses its feedback and declares PASS
->   (closing the bead) or FAIL/NEEDS-WORK (sending it back to the implementer)
+> * picks the highest-priority ready bead, and pairs a second ready bead only
+>   when it meets the eligibility rules (disjoint `Files:`, no shared infra,
+>   not `model:opus`, one-line low-interference justification) — at most 2
+>   beads in flight
+> * dispatches each bead to an implementer in its own git worktree (always a
+>   worktree, even for a solo bead) and waits for its return notes,
+>   inspecting any side-task beads it nominates
+> * dispatches the reviewer into each worktree, in a fresh context, judged
+>   against the bead's done-criteria
+> * adjudicates per bead independently: PASS means one commit in the
+>   worktree, merged into the epic branch, then the bead is closed; gaps mean
+>   one fix pass and re-review, and a second failure stops the batch
+> * once every bead in the batch has landed, runs all tests once on the epic
+>   branch, then stops and reports before the next batch
 >
 > When all tasks in an epic are complete, tell the orchestrator to
 > **"land the plane"** and it will:
