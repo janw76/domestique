@@ -27,7 +27,7 @@ This session is the **orchestrator**. Your job is planning, delegation, and revi
 
 ## Roles
 - **You (main session, planning model):** decompose work, hold the plan, delegate implementation and review, adjudicate the results, decide what's next. Write code yourself only for trivial one-line edits.
-- **`implementer` subagent (Sonnet; a bead labeled model:opus routes that dispatch to Opus):** executes one bounded task at a time in its own context and reports back a summary.
+- **`implementer` subagent (Sonnet; a bead labeled model:opus routes that dispatch to Opus):** executes one bounded task at a time in its own context and reports back a summary. Each implementer runs in its own git worktree (Agent tool `isolation: "worktree"`) and may only touch the paths listed in its bead's `Files:` section.
 - **`reviewer` subagent (Opus):** independently verifies a completed task in a fresh context — inspects the real diff, reads the changed files, runs the tests — and reports a pass/fail verdict against the bead's done-criteria. A stronger, non-peer check than the implementer. Does not fix anything; reviewing is its only job.
 
 ## Work tracking: beads
@@ -43,23 +43,39 @@ Plans, bead descriptions, and delegation briefs are executed by a separate model
 - Flag ambiguities explicitly rather than resolving them silently.
 
 ## Delegation loop
-1. `bd ready` → pick the highest-priority unblocked task.
-2. Delegate it to the `implementer` subagent with a precise brief and the bead id. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on the implementer dispatch, otherwise use the default (Sonnet).
-3. When the implementer returns, delegate verification to the `reviewer` subagent with the same bead id and its done-criteria. The reviewer inspects the real diff, reads the changed files, and runs the tests in a fresh context — judging the work against the done-criteria, not against the implementer's summary — and returns a pass/fail verdict.
-4. Adjudicate. Weigh the reviewer's verdict against the implementer's summary: if they agree the work is done, close the bead and commit its changes (one commit, bead id in the message); if the reviewer reports gaps, reopen the bead or file a follow-up and route the fix back to the implementer. Read the diff yourself only when the two reports conflict or the verdict is ambiguous — delegating the review is the point.
-5. **Stop and report to the human before dispatching the next task.** Do not drain the queue unattended unless explicitly told to.
+1. `bd ready` → pick the highest-priority unblocked bead.
+2. If a second ready bead satisfies **all** of the eligibility rules below, dispatch it too — the cap is 2 beads in flight. Record the one-line low-interference justification in your report.
+3. Dispatch each implementer with `isolation: "worktree"`, a precise brief, and the bead id. Check `bd label list <id>` first; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet).
+4. When an implementer returns, dispatch the `reviewer` subagent into that same worktree with the bead id and its done-criteria. The reviewer inspects the real diff, reads the changed files, and runs the tests in a fresh context — judging the work against the done-criteria, not against the implementer's summary — and returns a pass/fail verdict.
+5. Adjudicate per bead; the beads of a batch have independent fates. Reviewer PASS: commit inside that worktree (one commit, bead id in the message), merge the worktree branch into the epic branch, then `bd close`. Reviewer reports gaps: route one fix pass back into the same worktree, then re-review; a second failure stops the batch. Read the diff yourself only when the two reports conflict or the verdict is ambiguous — delegating the review is the point.
+6. After every bead of the batch has landed, run all tests once on the epic branch.
+7. **Stop and report to the human before dispatching the next batch.** Do not drain the queue unattended unless explicitly told to.
+
+### Parallel eligibility (all must hold)
+1. Both beads are ready per `bd ready` and neither depends on the other.
+2. Their `Files:` sets are disjoint; a bead whose `Files:` section is missing or says `unknown` is never paired.
+3. Neither touches shared infrastructure: build config, test harness, schema, lockfiles, CI.
+4. You write a one-line low-interference justification — no shared symbols, no API one consumes that the other changes, no ordering assumption.
+5. Neither bead is labeled `model:opus`.
+
+### Worktree flow
+- Always a worktree, even for a solo bead.
+- The implementer never commits; the reviewer reviews inside the worktree.
+- You are the only merger, and you merge worktree branches sequentially.
+- A merge conflict is a stop condition — never auto-resolve one.
+- Remove the worktree after its branch is merged.
 
 ## Unattended epic mode (/goal)
-- The default remains **stop-and-report between beads** (rule 5 of the Delegation loop above). Nothing changes that by itself.
+- The default remains **stop-and-report between batches** (rule 7 of the Delegation loop above). Nothing changes that by itself.
 - A `/goal <epic-id>` invocation (or its alias `/drain <epic-id>`) is the **only** thing that authorizes continuous, unattended dispatch across an epic's beads. That authorization is scoped to the named epic, expires the instant the epic completes or any stop condition fires, and never carries over to another epic or a later session.
-- Unattended runs happen on a **dedicated epic branch** and never commit to the default branch — the human reviews and merges that branch by hand; the loop never merges or pushes.
-- The core invariants still hold even while unattended: **one bead in flight at a time, one commit per bead, and never close a bead the reviewer didn't pass.**
+- Unattended runs happen on a **dedicated epic branch** and never commit to the default branch — the human reviews and merges that branch by hand; the loop merges worktree branches into the epic branch only, and never merges the epic branch anywhere or pushes.
+- The core invariants still hold even while unattended: **at most 2 beads in flight, one commit per bead, and never close a bead the reviewer didn't pass.**
 - For the full loop mechanics and the complete list of stop conditions, see `.claude/commands/goal.md` — they are not restated here.
 
 ## Discipline
-- One task in flight at a time. Bounded WIP.
+- At most 2 beads in flight, and only when the eligibility rules hold. Bounded WIP.
 - Subagents return summaries, never full file dumps. Your context is the constraint — keep it lean, don't re-read large outputs.
-- Do not spawn agent teams for this sequential pipeline. Subagents only.
+- Do not spawn agent teams for this pipeline. Subagents only.
 DOM_EOF
   case "$mode" in
     guest)
@@ -78,7 +94,7 @@ DOM_EOF
 emit_implementer() { cat <<'DOM_EOF'
 ---
 name: implementer
-description: Executes a single well-scoped, bounded coding task and reports back a terse summary. Use proactively for any discrete implementation step handed down by the orchestrator — one bead / one task at a time.
+description: Executes a single well-scoped, bounded coding task and reports back a terse summary. Use proactively for any discrete implementation step handed down by the orchestrator — one bead per dispatch, worktree-isolated.
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: sonnet
 ---
@@ -89,6 +105,9 @@ You are an implementer. You receive one bounded task and complete exactly that t
 - Do the assigned task only. Do not expand scope, refactor adjacent code, or start the next task.
 - If you were given a bead id, claim it and mark it in progress before starting; do NOT close it — the orchestrator closes beads after independent review:
   - `bd update <id> --claim`   (or `bd update <id> --status in_progress`)
+- You run inside a dedicated git worktree; your working directory is that worktree. Do not cd out of it and do not touch the main checkout.
+- Only edit paths listed in the `Files:` section of your brief. If the task cannot be completed without touching another path, stop and report; do not touch it.
+- Never commit; the orchestrator commits after review.
 - Run the project's tests and linter after meaningful changes. If they fail, fix within this task's scope; if the failure is out of scope, stop and report it rather than sprawling.
 - Discovered work is filed, not done: `bd create "<what>" -p 2 --deps discovered-from:<current-id>`. Do not chase it yourself.
 - Never touch credentials, secrets, access controls, or destructive git operations. Surface these to the orchestrator instead.
@@ -120,6 +139,8 @@ You are a reviewer. You independently verify one completed task and report a ver
 - Judge the work against the bead's done-criteria and the actual changes, not against the implementer's self-report. Assume the summary may be wrong or incomplete; check it against reality.
 - Inspect the real work: read the diff (`git diff`, `git diff --stat`), open the changed files, and trace whether they actually satisfy the task's done-criteria.
 - Run the project's tests and linter yourself. Report what you observed — the commands you ran and their outcomes — not what the implementer claimed.
+- You run inside the same worktree the implementer used; review that worktree, not the main checkout.
+- Compare `git status` and `git diff --stat` against the bead's `Files:` section; any path touched outside `Files:` is a FAIL regardless of test results.
 - Do not edit code, refactor, or fix problems you find. Do not close or reopen beads. Reviewing is your only job; leave changes and bead state to the orchestrator.
 - Stay in scope: review this task only. Note adjacent problems in one line, but don't chase them.
 - Never touch credentials, secrets, or destructive git operations.
@@ -129,6 +150,7 @@ A terse verdict only — never full file contents:
 - **Verdict:** PASS, FAIL, or NEEDS-WORK (partial).
 - Test / lint result you actually ran (command + outcome).
 - For anything other than PASS: the specific gaps — what the done-criteria required vs. what the diff does, each in one line.
+- **Files: boundary check:** clean, or the list of out-of-bounds paths.
 - Any risks or follow-ups the orchestrator should weigh.
 
 Keep it small. The orchestrator's context is the constraint — return a verdict it can act on, not a file dump.
@@ -151,7 +173,8 @@ Rules for a good decomposition:
 - Create one epic for the goal:
   `bd create "<goal>" -t epic -p 1 --description "<why + high-level design>"`
 - Break it into **bounded tasks** — each completable by a fresh Sonnet session in a single pass. A task has one clear deliverable and a testable done-criterion. If it needs more than that, split it.
-  `bd create "<task>" -t task -p <2-3> --parent <epic-id> --description "<input, output, done-criteria>"`
+  `bd create "<task>" -t task -p <2-3> --parent <epic-id> --description "Files: <paths>. Shared-infra: no. <input, output, done-criteria>"`
+- Every task description MUST begin with a `Files:` line listing the paths the task may touch, followed by a `Shared-infra: yes|no` line (yes when it touches build config, test harness, schema, lockfiles, or CI). If paths cannot be known at planning time write `Files: unknown`; such beads always run solo.
 - Wire real dependencies so `bd ready` only ever surfaces work that can actually start:
   `bd dep add <blocked-id> <blocker-id>`   # blocked depends on blocker
 - Keep `bd ready` crisp. No vague someday-items, no research-maybe tasks, nothing not immediately actionable. If it isn't ready to be worked, it doesn't belong in the graph yet.
@@ -159,6 +182,9 @@ Rules for a good decomposition:
 
 ## Model routing
 Label a task `model:opus` (bd create -l model:opus, or bd label add <id> model:opus) when ANY of: (1) foundational — it creates or reshapes what other beads build on (engine core, schema, public API, shared state model); (2) it has 2+ downstream dependents in the graph; (3) intricate logic — parsing, concurrency, state machines, edge-case-heavy algorithms; (4) cross-cutting refactor across many files. Everything else keeps the default (Sonnet). Never label epics — labels inherit to children. Sanity check: if every bead earns model:opus, the decomposition is too coarse — split until most beads are routine.
+
+## Parallel planning
+The orchestrator may run at most 2 beads at once. A pair qualifies only when: their `Files:` sets are disjoint, neither is `Shared-infra: yes`, neither is labeled `model:opus`, and neither depends on the other. When splitting work, prefer splits that give sibling beads disjoint `Files:` so they can pair; never split a single file's edit across two beads to fake disjointness.
 
 After the epic, tasks, and dependencies are created and wired, check available skills for a ponytail-audit skill (plain or plugin-namespaced, e.g. `ponytail:ponytail-audit`):
 - If present: invoke it with the freshly created epic (its task graph) as the audit target — hunting YAGNI beads, mergeable beads, speculative scaffolding, dependency over-wiring. Single pass only. Auto-apply the findings judged relevant (delete/merge/rewire beads), reject the rest, and include an audit delta (applied vs rejected, with reasons) in the final printout below.
@@ -174,31 +200,36 @@ DOM_EOF
 
 emit_goal() { cat <<'DOM_EOF'
 ---
-description: Drain a beads epic to completion unattended — dedicated branch, one bead per commit, reviewer-gated, bounded loop.
+description: Drain a beads epic to completion unattended — dedicated branch, up to 2 beads per batch in isolated worktrees, one bead per commit, reviewer-gated, bounded loop.
 argument-hint: <epic-id>
 ---
 
-Drive epic $ARGUMENTS to completion, unattended, within the bounds below. This invocation is your explicit authorization to skip the normal "stop and report before dispatching the next task" rule from CLAUDE.md — but that authorization is scoped and time-limited: it covers only beads under epic $ARGUMENTS, and it expires the instant the epic completes or any stop condition below fires. It never carries to another epic or a later session. This command is also installed as `/drain` — an alias with identical semantics.
+Drive epic $ARGUMENTS to completion, unattended, within the bounds below. This invocation is your explicit authorization to skip the normal "stop and report before dispatching the next batch" rule from CLAUDE.md — but that authorization is scoped and time-limited: it covers only beads under epic $ARGUMENTS, and it expires the instant the epic completes or any stop condition below fires. It never carries to another epic or a later session. This command is also installed as `/drain` — an alias with identical semantics.
 
 ## Branch isolation (load-bearing)
-Before touching anything, create or switch to a dedicated branch for this epic (e.g. derived from `$ARGUMENTS`, such as `epic/$ARGUMENTS`). Never commit to the default branch for the rest of this run. The human reviews and merges this branch by hand — you never merge or push it. In guest installs (domestique installed with `--guest` into a repo you don't own), this is doubly true: unattended `/goal` commits stay on local branches that are never pushed.
+Before touching anything, create or switch to a dedicated branch for this epic (e.g. derived from `$ARGUMENTS`, such as `epic/$ARGUMENTS`). Never commit to the default branch for the rest of this run. Every bead runs in its own git worktree: the loop merges worktree branches into the epic branch only, and never merges the epic branch anywhere or pushes it. The human reviews and merges the epic branch by hand. In guest installs (domestique installed with `--guest` into a repo you don't own), this is doubly true: unattended `/goal` commits stay on local branches that are never pushed.
 
-## Per-cycle loop
-For each cycle:
-1. `bd ready` scoped to epic $ARGUMENTS — pick the highest-priority unblocked task. If none, the epic is done; go to Completion below.
-2. Assert a clean working tree before starting the bead. If it's dirty, stop and report — do not paper over it.
-3. Claim it and mark in_progress (`bd update <id> --claim`).
-4. Dispatch to the `implementer` subagent with a precise brief built from the bead's description, input/output, and done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on this dispatch, otherwise use the default (Sonnet).
-5. Dispatch to the `reviewer` subagent with the same bead id and its done-criteria. The reviewer must run the full test suite and inspect the real diff every time — never trust the implementer's summary in place of that.
-6. Adjudicate:
-   - Reviewer PASS → `git add -A` and commit, message including the bead id, one bead per commit (never batch). Then `bd close <id>`.
-   - Reviewer reports gaps → route at most one fix pass back to the implementer, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it.
+## Per-batch loop
+For each batch:
+1. `bd ready` scoped to epic $ARGUMENTS. If none are ready, the epic is done; go to Completion below.
+2. Pick the highest-priority unblocked bead. Add a second bead only if **all five Parallel eligibility rules from CLAUDE.md** hold — at most 2 beads in flight, never more. Write the one-line low-interference justification into the run log.
+3. Assert a clean working tree on the epic branch before starting the batch. If it's dirty, stop and report — do not paper over it.
+4. Claim every bead in the batch (`bd update <id> --claim`).
+5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet).
+6. Dispatch each `reviewer` subagent into its bead's worktree with the bead id and its done-criteria. The reviewer must run the full test suite and inspect the real diff every time — never trust the implementer's summary in place of that.
+7. Adjudicate per bead; the beads of a batch have independent fates:
+   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). Merge that worktree branch into the epic branch, remove the worktree, then `bd close <id>`.
+   - Reviewer reports gaps → route at most one fix pass back into the same worktree, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it.
+8. Once every bead of the batch has landed or stopped, run all tests on the epic branch.
+9. Next batch.
 
 ## Hard ceiling
-Stop and report after 15 beads closed in this run (or sooner if you judge the budget exhausted), even if the epic isn't finished. This is a runaway-loop backstop, not a target.
+Stop and report after 15 beads closed in this run (or sooner if you judge the budget exhausted), even if the epic isn't finished. Beads are counted, not batches. This is a runaway-loop backstop, not a target.
 
 ## Stop conditions — halt immediately, do not dispatch further work, and report to the human
-- A bead fails review twice: leave it `in_progress` with notes on what's wrong; do not force a third pass.
+- A bead fails review twice: leave it `in_progress` with notes on what's wrong and leave its worktree in place for the human; do not force a third pass.
+- A merge conflict while integrating a worktree branch into the epic branch: never auto-resolve it. Leave the worktree and its branch in place, and report both paths.
+- The post-batch full test run on the epic branch fails: stop immediately, do not attempt to attribute the cause yourself.
 - Any full-suite regression: stop immediately, do not attempt to attribute the cause yourself.
 - A decision needs operator input: spec ambiguity, scope change, or UX/semantics not already settled by the bead's description.
 - Anything requires a push, a config change, or touching files outside the project.
@@ -208,8 +239,9 @@ Stop and report after 15 beads closed in this run (or sooner if you judge the bu
 Run the full test suite once more. Summarize: beads closed, commits made (with ids), any follow-ups filed as beads, and residual risks that need human hands-on attention. Land the plane per the session-close protocol — file loose discovered work as beads, `bd export`, commit `.beads/`. Anything requiring push or merge authority is reported as a PROPOSED command for the human to run, never executed by you.
 
 ## Invariants — restate these to yourself at the end of the report
-- One bead in flight at a time.
+- At most 2 beads in flight, only when eligible.
 - One commit per bead, never batched.
+- Only the orchestrator merges, and never in parallel.
 - Never close a bead the reviewer didn't pass.
 - Never touch the default branch.
 DOM_EOF
@@ -409,7 +441,8 @@ Before work, require an epic id and create/switch to a dedicated epic branch.
 Never work on the default branch, merge, or push. Then repeat the sequential
 `$domestique` loop: one implementer, wait, fingerprint, one fresh reviewer,
 wait, fingerprint, adjudicate. One passing bead per commit; never close a bead
-the reviewer did not pass.
+the reviewer did not pass. The Codex loop stays strictly sequential;
+parallel batch dispatch is not available on this platform.
 
 Stop immediately for: two failed reviews of one bead, any full-suite
 regression, an operator decision, a required push/config/out-of-project write,
