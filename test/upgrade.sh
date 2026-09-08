@@ -144,6 +144,7 @@ scenario_fresh_install() {
   check "goal.md has batch" grep -qF 'batch' "$t/.claude/commands/goal.md"
   check "goal.md has isolation" grep -qF 'isolation' "$t/.claude/commands/goal.md"
   check "goal.md has merge conflict" grep -qF 'merge conflict' "$t/.claude/commands/goal.md"
+  check "goal.md has bead-count ceiling" grep -qF '15 beads closed in this run' "$t/.claude/commands/goal.md"
   check "drain.md has batch" grep -qF 'batch' "$t/.claude/commands/drain.md"
   check "drain.md has isolation" grep -qF 'isolation' "$t/.claude/commands/drain.md"
   check "drain.md has merge conflict" grep -qF 'merge conflict' "$t/.claude/commands/drain.md"
