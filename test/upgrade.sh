@@ -135,6 +135,7 @@ scenario_fresh_install() {
   check "decompose.md requires full task title in dispatch table" grep -qF 'full task title' "$t/.claude/commands/decompose.md"
   check "decompose.md requires full epic title heading" grep -qF 'full epic title' "$t/.claude/commands/decompose.md"
   check "decompose.md requires verbatim titles" grep -qF 'verbatim' "$t/.claude/commands/decompose.md"
+  check "decompose.md names the audit in the phase announcement" grep -qF 'start the ponytail-audit step' "$t/.claude/commands/decompose.md"
   check "CLAUDE.md has Parallel eligibility" grep -qF 'Parallel eligibility' "$t/CLAUDE.md"
   check "CLAUDE.md has Worktree flow" grep -qF 'Worktree flow' "$t/CLAUDE.md"
   check "CLAUDE.md has at most 2" grep -qF 'at most 2' "$t/CLAUDE.md"

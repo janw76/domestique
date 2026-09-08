@@ -188,7 +188,7 @@ Before creating the epic, check the session's available skills for a grilling sk
 - If present: invoke it on the goal/spec above and run its one-question-at-a-time interview until shared understanding is explicitly confirmed, resolving every open decision. Depth is self-limiting — a tight spec exits after brief confirmation. Only then proceed to create the epic below.
 - If absent: print exactly this notice and continue: `No grilling skill installed — jumping straight to epic creation.`
 
-Say in one line when you move from the interview to creating beads, and again when you start the audit.
+Say in one line when you are about to create the first bead, and again when you start the ponytail-audit step described below.
 
 Rules for a good decomposition:
 - Create one epic for the goal:
@@ -211,7 +211,11 @@ Label a task `model:opus` (bd create -l model:opus, or bd label add <id> model:o
 - intricate logic — parsing, concurrency, state machines, edge-case-heavy algorithms
 - cross-cutting refactor across many files
 
-Everything else keeps the default (Sonnet). Never label epics — labels inherit to children. Sanity check: if every bead earns model:opus, the decomposition is too coarse — split until most beads are routine.
+Everything else keeps the default (Sonnet).
+
+Never label epics — labels inherit to children.
+
+Sanity check: if every bead earns model:opus, the decomposition is too coarse — split until most beads are routine.
 
 ## Parallel planning
 The orchestrator may run at most 2 beads at once. A pair qualifies only when: their `Files:` sets are disjoint, neither is `Shared-infra: yes`, neither is labeled `model:opus`, and neither depends on the other. When splitting work, prefer splits that give sibling beads disjoint `Files:` so they can pair; never split a single file's edit across two beads to fake disjointness — both implementers would need the whole file, and the second merge would conflict.

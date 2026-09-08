@@ -207,6 +207,12 @@ D5. **Rule:** G4. **Text:** line 187 `never split a single file's edit across tw
 
 D6. **Rule:** F1. **Text:** lines 168-193 — the command runs an interview, many `bd` calls, and an audit with no instruction about what the human sees between phases. **Change:** add before line 172: `Say in one line when you move from the interview to creating beads, and again when you start the audit.` **Why:** Fable 5.1 goes quiet during long tool chains, and this command has three silent phases.
 
+D7. **Rule:** G2. **Text:** line 191 `Say in one line when you move from the interview to creating beads, and again when you start the audit.` **Change:** `Say in one line when you are about to create the first bead, and again when you start the ponytail-audit step described below.` **Why:** "the audit" is a forward reference — the ponytail-audit step is introduced about 25 lines later and is unnamed at this point.
+
+D8. **Rule:** G1. **Text:** same line and same old/new text as D7 (line 191, `...when you move from the interview...` → `...about to create the first bead...`). **Why:** the original phrasing has no trigger when no grilling skill is installed (no interview happens on that branch); anchoring to bead creation instead covers both the grilling and no-grilling paths.
+
+D9. **Rule:** G3. **Text:** line 214, `Everything else keeps the default (Sonnet). Never label epics — labels inherit to children. Sanity check: if every bead earns model:opus, the decomposition is too coarse — split until most beads are routine.` **Change:** split into three separate lines, one sentence each, blank line between. **Why:** the paragraph packs three distinct instructions (default, epic exclusion, self-check) into one run-on; separating them makes each independently scannable.
+
 ### Satisfied
 
 - G1: each `bd` invocation is spelled out with flags (174, 176, 179, 194).
