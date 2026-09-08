@@ -155,6 +155,7 @@ scenario_fresh_install() {
   check "implementer.md has return example" grep -qF 'refresh tokens not rotated' "$t/$IMPL_REL"
   check "reviewer.md has worktree" grep -qF 'worktree' "$t/.claude/agents/reviewer.md"
   check "reviewer.md has Files:" grep -qF 'Files:' "$t/.claude/agents/reviewer.md"
+  check "reviewer.md has verdict example" grep -qF 'test_expiry' "$t/.claude/agents/reviewer.md"
   check "CLAUDE.md retires one-bead-in-flight phrase" bash -c '! grep -qi "one bead in flight at a time" "$1"' _ "$t/CLAUDE.md"
   check "goal.md retires one-bead-in-flight phrase" bash -c '! grep -qi "one bead in flight at a time" "$1"' _ "$t/.claude/commands/goal.md"
   check "drain.md retires one-bead-in-flight phrase" bash -c '! grep -qi "one bead in flight at a time" "$1"' _ "$t/.claude/commands/drain.md"
