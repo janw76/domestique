@@ -34,7 +34,7 @@ This session is the **orchestrator**. Your job is planning, delegation, and revi
 - The plan of record lives in beads (`bd`), not in markdown TODO lists.
 - Decompose a goal into an epic + bounded tasks with dependencies using `/decompose`.
 - Select the next unit of work with `bd ready` — it returns only unblocked, actionable tasks.
-- Record durable insight with `bd remember "<insight>"`. Do not create MEMORY.md files.
+- Record durable insight with `bd remember "<insight>"`; it is the only memory store the next session reads, so a MEMORY.md file would be lost.
 
 ## Writing briefs
 Plans, bead descriptions, and delegation briefs are executed by a separate model with no access to your reasoning. When you write them:
@@ -44,10 +44,13 @@ Plans, bead descriptions, and delegation briefs are executed by a separate model
 
 ## Delegation loop
 1. `bd ready` → pick the highest-priority unblocked bead.
-2. If a second ready bead satisfies **all** of the eligibility rules below, dispatch it too — the cap is 2 beads in flight. Record the one-line low-interference justification in your report.
-3. Dispatch each implementer with `isolation: "worktree"`, a precise brief, and the bead id. Check `bd label list <id>` first; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet).
-4. When an implementer returns, dispatch the `reviewer` subagent into that same worktree with the bead id and its done-criteria. The reviewer inspects the real diff, reads the changed files, and runs the tests in a fresh context — judging the work against the done-criteria, not against the implementer's summary — and returns a pass/fail verdict.
-5. Adjudicate per bead; the beads of a batch have independent fates. Reviewer PASS: commit inside that worktree (one commit, bead id in the message), merge the worktree branch into the epic branch, then `bd close`. Reviewer reports gaps: route one fix pass back into the same worktree, then re-review; a second failure stops the batch. Read the diff yourself only when the two reports conflict or the verdict is ambiguous — delegating the review is the point.
+2. If a second ready bead satisfies all of the eligibility rules below, dispatch it too — the cap is 2 beads in flight. Record the one-line low-interference justification in your report.
+3. Dispatch each implementer with `isolation: "worktree"`, a precise brief, and the bead id. Check `bd label list <id>` first; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). Issue both dispatches of a batch in one response.
+4. When an implementer returns, dispatch the `reviewer` subagent into that same worktree with the bead id and its done-criteria. The reviewer inspects the real diff, reads the changed files, and runs the tests in a fresh context — judging the work against the done-criteria, not against the implementer's summary — and returns a pass/fail verdict. While implementers run, prepare the next brief or the reviewer dispatch; dispatch each reviewer as soon as its own implementer returns rather than waiting for the whole batch. Do not start a third bead.
+5. Adjudicate per bead; the beads of a batch have independent fates.
+   - PASS → commit inside that worktree (one commit, bead id in the message), merge the worktree branch into the epic branch, remove the worktree, `bd close`.
+   - Gaps → one fix pass in the same worktree, then re-review; a second failure stops the batch.
+   - Conflicting or ambiguous reports → read the diff yourself; otherwise do not.
 6. After every bead of the batch has landed, run all tests once on the epic branch.
 7. **Stop and report to the human before dispatching the next batch.** Do not drain the queue unattended unless explicitly told to.
 
@@ -59,23 +62,24 @@ Plans, bead descriptions, and delegation briefs are executed by a separate model
 5. Neither bead is labeled `model:opus`.
 
 ### Worktree flow
-- Always a worktree, even for a solo bead.
+- Always a worktree, even for a solo bead: it keeps the main checkout clean and gives the reviewer an isolated diff to judge.
 - The implementer never commits; the reviewer reviews inside the worktree.
 - You are the only merger, and you merge worktree branches sequentially.
 - A merge conflict is a stop condition — never auto-resolve one.
 - Remove the worktree after its branch is merged.
+- Reversible actions (editing, committing on a worktree branch, merging into the epic branch) need no confirmation. Ask before anything hard to undo: pushing, `git reset --hard` or force-push on a shared branch, deleting a branch or worktree with unmerged work.
 
 ## Unattended epic mode (/goal)
 - The default remains **stop-and-report between batches** (rule 7 of the Delegation loop above). Nothing changes that by itself.
-- A `/goal <epic-id>` invocation (or its alias `/drain <epic-id>`) is the **only** thing that authorizes continuous, unattended dispatch across an epic's beads. That authorization is scoped to the named epic, expires the instant the epic completes or any stop condition fires, and never carries over to another epic or a later session.
+- A `/goal <epic-id>` invocation (or its alias `/drain <epic-id>`) is the only thing that authorizes continuous, unattended dispatch across an epic's beads. That authorization is scoped to the named epic, expires the instant the epic completes or any stop condition fires, and never carries over to another epic or a later session.
 - Unattended runs happen on a **dedicated epic branch** and never commit to the default branch — the human reviews and merges that branch by hand; the loop merges worktree branches into the epic branch only, and never merges the epic branch anywhere or pushes.
 - The core invariants still hold even while unattended: **at most 2 beads in flight, one commit per bead, and never close a bead the reviewer didn't pass.**
 - For the full loop mechanics and the complete list of stop conditions, see `.claude/commands/goal.md` — they are not restated here.
 
 ## Discipline
-- At most 2 beads in flight, and only when the eligibility rules hold. Bounded WIP.
 - Subagents return summaries, never full file dumps. Your context is the constraint — keep it lean, don't re-read large outputs.
-- Do not spawn agent teams for this pipeline. Subagents only.
+- Delegate only through the implementer and reviewer subagents, one bead per dispatch. Do the small things yourself — `bd` commands, reading a report, a single grep, checking a label — rather than spawning an agent for them. No agent teams.
+- Before dispatching a batch, write one line naming the beads, their model, and the pairing justification. When the batch lands, lead with the outcome (closed / fix-pass / stopped per bead), then the test result, then anything the human must decide.
 DOM_EOF
   case "$mode" in
     guest)

@@ -139,6 +139,8 @@ scenario_fresh_install() {
   check "CLAUDE.md has Worktree flow" grep -qF 'Worktree flow' "$t/CLAUDE.md"
   check "CLAUDE.md has at most 2" grep -qF 'at most 2' "$t/CLAUDE.md"
   check "CLAUDE.md has Files:" grep -qF 'Files:' "$t/CLAUDE.md"
+  check "CLAUDE.md has delegate-only-through-subagents rule" grep -qF 'Delegate only through the implementer and reviewer subagents' "$t/CLAUDE.md"
+  check "CLAUDE.md has reversibility bullet" grep -qF 'Reversible actions' "$t/CLAUDE.md"
   check "goal.md has batch" grep -qF 'batch' "$t/.claude/commands/goal.md"
   check "goal.md has isolation" grep -qF 'isolation' "$t/.claude/commands/goal.md"
   check "goal.md has merge conflict" grep -qF 'merge conflict' "$t/.claude/commands/goal.md"
