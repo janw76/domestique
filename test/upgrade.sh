@@ -149,6 +149,7 @@ scenario_fresh_install() {
   check "drain.md has merge conflict" grep -qF 'merge conflict' "$t/.claude/commands/drain.md"
   check "decompose.md has Files:" grep -qF 'Files:' "$t/.claude/commands/decompose.md"
   check "decompose.md has Shared-infra:" grep -qF 'Shared-infra:' "$t/.claude/commands/decompose.md"
+  check "decompose.md has worked example" grep -qF 'Add unary-minus parsing' "$t/.claude/commands/decompose.md"
   check "decompose.md has Parallel planning" grep -qF 'Parallel planning' "$t/.claude/commands/decompose.md"
   check "implementer.md has worktree" grep -qF 'worktree' "$t/$IMPL_REL"
   check "implementer.md has Never commit" grep -qF 'Never commit' "$t/$IMPL_REL"
