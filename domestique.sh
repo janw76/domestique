@@ -243,10 +243,10 @@ Before touching anything, create or switch to a dedicated branch for this epic (
 ## Per-batch loop
 For each batch:
 1. `bd ready` scoped to epic $ARGUMENTS. If none are ready, the epic is done; go to Completion below.
-2. Pick the highest-priority unblocked bead. Add a second bead only if all five Parallel eligibility rules from CLAUDE.md hold — at most 2 beads in flight, never more. Write the one-line low-interference justification in your batch line: at each batch start write `batch N: <ids> (<models>) — <justification>`, and at each batch end `batch N: <id> closed / fix-pass / stopped`. These lines are the run log.
+2. Pick the highest-priority unblocked bead. Add a second bead only if all five Parallel eligibility rules from CLAUDE.md hold — at most 2 beads in flight, never more. Write the one-line low-interference justification in your batch line: at each batch start write `batch N: <ids> (<models>) — <justification>`, and at each batch end `batch N: <id> closed / fix-pass / stopped`. These lines are the run log; they are printed in your report text to the human, one line at batch start and one at batch end.
 3. Assert a clean working tree on the epic branch before starting the batch. If it's dirty, stop and report — do not stash, reset, or commit it.
 4. Claim every bead in the batch (`bd update <id> --claim`).
-5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). Issue both implementer dispatches in one response.
+5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). When a batch has two beads, issue both implementer dispatches in one response.
 6. Dispatch each `reviewer` subagent into its bead's worktree with the bead id and its done-criteria. The reviewer runs the full suite and reads the diff itself; its verdict, not the implementer's summary, decides. Dispatch a reviewer as soon as its implementer returns; while one bead is under review, the other may still be implementing. Never start a third bead.
 7. Adjudicate per bead; the beads of a batch have independent fates:
    - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). Merge that worktree branch into the epic branch, remove the worktree, then `bd close <id>`.
@@ -258,7 +258,7 @@ For each batch:
 Stop and report after 15 beads closed in this run, even if the epic isn't finished. Beads are counted, not batches. This is a runaway-loop backstop, not a target.
 
 ## State survives compaction
-Keep run state in beads, not in context: on each close, `bd close <id> --reason "run <n>/15"`; on each failed review, `bd update <id> --notes "review-fail <n>"`. If your context is compacted, re-derive the closed count and per-bead failure counts from `bd` before the next batch.
+Keep run state in beads, not in context: on each close, `bd close <id> --reason "run <n>/15"`; on each failed review, append two lines to the bead's notes with `bd update <id> --append-notes` (appending, not overwriting, so a second failure doesn't clobber the first diagnostic) — first the review diagnostic (what's wrong), then the counter (`review-fail <n>`). If your context is compacted, re-derive the closed count and per-bead failure counts from `bd` before the next batch.
 
 ## Stop conditions — halt immediately, do not dispatch further work, and report to the human
 - A bead fails review twice: leave it `in_progress` with notes on what's wrong and leave its worktree in place for the human; do not force a third pass.
