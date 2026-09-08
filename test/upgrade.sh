@@ -152,6 +152,7 @@ scenario_fresh_install() {
   check "decompose.md has Parallel planning" grep -qF 'Parallel planning' "$t/.claude/commands/decompose.md"
   check "implementer.md has worktree" grep -qF 'worktree' "$t/$IMPL_REL"
   check "implementer.md has Never commit" grep -qF 'Never commit' "$t/$IMPL_REL"
+  check "implementer.md has return example" grep -qF 'refresh tokens not rotated' "$t/$IMPL_REL"
   check "reviewer.md has worktree" grep -qF 'worktree' "$t/.claude/agents/reviewer.md"
   check "reviewer.md has Files:" grep -qF 'Files:' "$t/.claude/agents/reviewer.md"
   check "CLAUDE.md retires one-bead-in-flight phrase" bash -c '! grep -qi "one bead in flight at a time" "$1"' _ "$t/CLAUDE.md"
