@@ -156,6 +156,7 @@ scenario_fresh_install() {
   check "implementer.md has worktree" grep -qF 'worktree' "$t/$IMPL_REL"
   check "implementer.md has Never commit" grep -qF 'Never commit' "$t/$IMPL_REL"
   check "implementer.md has return example" grep -qF 'refresh tokens not rotated' "$t/$IMPL_REL"
+  check "implementer.md guards claim on bead id" grep -qF 'If you were given a bead id' "$t/$IMPL_REL"
   check "reviewer.md has worktree" grep -qF 'worktree' "$t/.claude/agents/reviewer.md"
   check "reviewer.md has Files:" grep -qF 'Files:' "$t/.claude/agents/reviewer.md"
   check "reviewer.md has verdict example" grep -qF 'test_expiry' "$t/.claude/agents/reviewer.md"
