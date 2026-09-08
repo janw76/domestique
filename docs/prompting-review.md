@@ -236,6 +236,12 @@ GO9. **Rule:** G1, G22. **Text:** line 227 `(or sooner if you judge the budget e
 
 GO10. **Rule:** G4. **Text:** line 235 `Anything requires a push, a config change, or touching files outside the project.` **Change:** append `— these are visible to others or hard to reverse, so they are the human's call.` **Why:** the reason lets the model classify actions the list does not name (G13).
 
+GO11. **Rule:** G16. **Text:** line 29 `on each failed review, \`bd update <id> --notes "review-fail <n>"\`.` **Change:** `on each failed review, append two lines to the bead's notes with \`bd update <id> --append-notes\` — first the review diagnostic (what's wrong), then the counter (\`review-fail <n>\`).` **Why:** `--notes` replaces the field rather than appending to it, so a second failed review on the same bead would clobber the first diagnostic the stop condition needs.
+
+GO12. **Rule:** G2. **Text:** line 14 `...\`batch N: <id> closed / fix-pass / stopped\`. These lines are the run log.` **Change:** append `; they are printed in your report text to the human, one line at batch start and one at batch end.` **Why:** the step defines the run-log lines but never says where they appear, leaving a colleague to guess the medium.
+
+GO13. **Rule:** G1. **Text:** line 17 `Issue both implementer dispatches in one response.` **Change:** `When a batch has two beads, issue both implementer dispatches in one response.` **Why:** the bare imperative assumes a two-bead batch and reads as wrong guidance for a solo batch.
+
 ### Satisfied
 
 - G1/G3: the per-batch loop is numbered and each step is concrete (214-224).
