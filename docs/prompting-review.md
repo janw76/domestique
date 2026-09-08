@@ -130,6 +130,10 @@ I6. **Rule:** G2. **Text:** line 106 `claim it and mark it in progress before st
 
 I7. **Rule:** G10. **Text:** line 106 `do NOT close it`. **Change:** `do not close it`. **Why:** capitalised emphasis is unnecessary on Sonnet 5 and the why ("the orchestrator closes beads after independent review") already carries the rule.
 
+I8. **Rule:** G1. **Text:** domestique.sh line 117-118, adjacent bullets `Implement the brief exactly as written; do not substitute your own interpretation.` followed by `Make routine judgment calls yourself (naming, placement, test shape) and note them in your summary. Stop and ask only when ...` read as contradictory to a reader with minimal context. **Change:** merge into one bullet: `Follow the brief's stated requirements exactly; do not reinterpret them. For details the brief leaves open (naming, placement, test shape), make routine judgment calls yourself and note them in your summary. Stop and ask only when different readings of the brief would produce materially different work; before stopping, finish every part that does not depend on the answer.` **Why:** separating "stated requirements" from "details left open" removes the apparent conflict without changing either rule.
+
+I9. **Rule:** G2. **Text:** domestique.sh line 110 `If the bead is not already \`in_progress\`, claim it: \`bd update <id> --claim\`; do not close it — ...` references `<id>` unconditionally, even for a dispatch with no bead id. **Change:** `If you were given a bead id and it is not already \`in_progress\`, claim it: \`bd update <id> --claim\`; do not close it — ...` **Why:** guards the claim instruction so a no-bead-id dispatch does not leave a dangling reference to an id that was never given.
+
 ### Satisfied
 
 - G1/G3: rules are bullets, each concrete; order does not matter so a numbered list is not needed.
