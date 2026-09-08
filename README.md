@@ -83,21 +83,32 @@ judgment-heavy work, where mistakes are expensive.
 
 The `implementer` subagent, on a fast, efficient model. Receives one bounded task,
 claims it and marks it in progress, does exactly that, runs the tests/linter,
-and returns a terse summary. It does **not** close its own bead — the
-orchestrator closes beads after the reviewer passes them. It works inside its
-own git worktree and may only touch the paths listed in its bead's `Files:`
-section.
+and returns a terse summary. It follows the brief's stated requirements
+exactly; for details the brief leaves open (naming, placement, test shape) it
+makes routine judgment calls itself and notes them in its summary, stopping
+to ask only when different readings of the brief would produce materially
+different work — finishing every part that does not depend on the answer first. It does
+**not** close its own bead — the orchestrator closes beads after the reviewer
+passes them. It works inside its own git worktree and may only touch the
+paths listed in its bead's `Files:` section.
 
 ### Reviewer
 
 The `reviewer` subagent, on a strong, independent model. In a *fresh context*
-(no anchoring on the implementer's story), it inspects the real `git diff`,
-reads the changed files, runs the tests itself, and returns a PASS / FAIL /
-NEEDS-WORK verdict judged against the bead's done-criteria — a stronger,
-non-peer check than the implementer. It reviews only — it never edits code or
-touches bead state. In Codex, the orchestrator fingerprints tracked and staged
-changes plus bead state before and after review; any reviewer-introduced delta
-is a failed review and an immediate stop. In Claude Code, the reviewer runs inside the implementer's
+(no anchoring on the implementer's story), it reads `git status --short` and
+`git diff`, then opens the changed files and the full content of any
+untracked file — new files don't show up in `git diff` — and runs the tests
+itself. It returns a PASS / FAIL / NEEDS-WORK verdict judged against the
+bead's done-criteria: PASS means every done-criterion is met and `Files:` is
+clean, FAIL means a criterion is unmet or a path fell outside `Files:`,
+NEEDS-WORK means the criteria are met but a defect it found must be fixed
+before merge. It reports every finding, including ones it's uncertain about
+or considers minor, each tagged with severity and confidence, rather than
+filtering for importance — a stronger, non-peer check than the implementer.
+It reviews only — it never edits code or touches bead state. In Codex, the
+orchestrator fingerprints tracked and staged changes plus bead state before
+and after review; any reviewer-introduced delta is a failed review and an
+immediate stop. In Claude Code, the reviewer runs inside the implementer's
 worktree and fails the bead if any change falls outside the `Files:`
 section.
 
@@ -381,13 +392,32 @@ checks for a ponytail-audit skill and, if found, runs it once against the
 fresh task graph, auto-applies the findings (delete/merge/rewire beads), and
 reports the applied/rejected delta; otherwise it prints a one-line notice and
 presents the first decomposition directly. Neither skill is required —
-decompose works unchanged without either installed.
+decompose works unchanged without either installed. It announces each phase
+to you in one line: when it is about to create the first bead, and again
+when the audit step starts.
+
+**The invocation opens with an explicit autonomy framing.** `/goal` tells the
+orchestrator it is operating unattended, that the user cannot answer
+mid-task questions, and that reversible actions following from the original
+request proceed without asking — the stop conditions below are the complete
+list of cases where it halts instead. It also carries a check for the
+end of every turn: if the last paragraph is a plan, a question, or a promise
+of work not yet done, do that work now instead of stopping there.
 
 **Authorization is scoped and temporary.** A goal invocation is
 the sole thing that authorizes continuous, unattended dispatch — and only
 across that epic's beads. It expires the instant the epic completes or any
 stop condition fires, and it never carries over to another epic or a later
 session.
+
+**State survives compaction.** The run keeps its progress in beads, not in
+conversation context: on each bead close it records `bd close <id> --reason
+"run <n>/15"`, and on each failed review it appends — never overwrites, via
+`bd update <id> --append-notes` — first the review diagnostic, then a
+`review-fail <n>` counter line, so a second failure doesn't clobber the
+first. If context gets compacted mid-epic, the orchestrator re-derives the
+closed count and per-bead failure counts from `bd` before starting the next
+batch.
 
 **Safety comes from branch isolation and the same invariants, held harder.**
 Before touching anything, the orchestrator creates or switches to a dedicated epic
@@ -401,7 +431,8 @@ branch after each batch lands. Within the run, the core invariants still
 hold: at most 2 beads in flight, only when eligible, one commit per bead
 (never batched), and never close a bead the reviewer didn't pass. A hard
 ceiling stops the run after 15 beads closed in one go, even if the epic
-isn't finished, as a runaway-loop backstop rather than a target.
+isn't finished — beads are counted, not batches; it is a runaway-loop backstop, not a
+target.
 
 **Stop conditions halt the loop immediately** and hand control back to you:
 a bead failing review twice, any full-suite regression, a decision needing
@@ -409,7 +440,7 @@ operator input (spec ambiguity, scope change, unsettled UX/semantics), anything
 requiring a push, a config change, or touching files outside the project, or
 two consecutive infrastructure/API errors. On completion, on hitting the
 ceiling, or on any stop condition, the orchestrator runs the full test suite once more,
-summarizes beads closed and commits made, land-the-planes as usual, and
+summarizes beads closed and commits made, lands the plane as usual, and
 reports anything needing push/merge authority as a proposed command for you
 to run — never executing it itself.
 
@@ -676,6 +707,19 @@ implies that provider). It always previews with
 - `4` — couldn't fetch or validate the source `domestique.sh`; nothing was
   touched.
 
+## Editing the templates
+
+The five Claude-side templates domestique emits (the CLAUDE.md policy block,
+`implementer`, `reviewer`, `/decompose`, `/goal`) are written against
+Anthropic's prompting guides — general, Sonnet, Opus, and Fable. When you
+change one, grade the rewrite against
+[`docs/prompting-review.md`](docs/prompting-review.md): it holds the rule
+checklist those guides implied and the finding log of what was already
+applied, so it's the reference for whether a new edit is consistent with the
+rest. `test/upgrade.sh` locks a set of load-bearing phrases from each
+template, so a rewrite that silently drops one fails the suite rather than
+the next reader.
+
 ## Testing the installer itself
 
 The self-contained suites cover install/upgrade merges, guest mode, Codex,
@@ -686,7 +730,7 @@ and `git` (plus any suite-specific fake command fixtures):
 bash test/upgrade.sh     # 12 scenarios: fresh install, merges, conflicts, adopt
 bash test/guest.sh       # 14 scenarios: --guest, sticky mode, --no-guest, worktrees
 bash test/uninstall.sh   # 23 scenarios: --uninstall, --purge-beads, round-trip, marker refusals
-bash test/codex.sh       # 16 scenarios: Codex, platforms, guest, Beads, updater, uninstall
+bash test/codex.sh       # 17 scenarios: Codex, platforms, guest, Beads, updater, uninstall
 ```
 
 ## License
