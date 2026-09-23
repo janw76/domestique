@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.0"
+DOMESTIQUE_VERSION="0.3.1"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -252,7 +252,7 @@ For each batch:
 5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). When a batch has two beads, issue both implementer dispatches in one response.
 6. Dispatch each `reviewer` subagent into its bead's worktree with the bead id and its done-criteria. The reviewer runs the full suite and reads the diff itself; its verdict, not the implementer's summary, decides. Dispatch a reviewer as soon as its implementer returns; while one bead is under review, the other may still be implementing. Never start a third bead.
 7. Adjudicate per bead; the beads of a batch have independent fates:
-   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). Merge that worktree branch into the epic branch, remove the worktree, then `bd close <id>`.
+   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). If the epic description carries a `redmine: #<n>` line, the commit message ends with `refs #<n>`. Merge that worktree branch into the epic branch, remove the worktree, then `bd close <id>`.
    - Reviewer reports gaps → route at most one fix pass back into the same worktree, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it.
 8. Once every bead of the batch has landed or stopped, run all tests on the epic branch.
 9. Next batch.
@@ -272,7 +272,7 @@ Keep run state in beads, not in context: on each close, `bd close <id> --reason 
 - Two consecutive infrastructure/API errors: before concluding it's an API outage, check `bd memories` for machine-sleep or known-flake notes.
 
 ## On epic completion (or hitting the ceiling)
-Run the full test suite once more. Summarize: beads closed, commits made (with ids), any follow-ups filed as beads, and residual risks that need human hands-on attention; end the report with one line: `Invariants: held` or the invariant that broke and where. Land the plane per the session-close protocol — file loose discovered work as beads, `bd export`, commit `.beads/`. Anything requiring push or merge authority is reported as a PROPOSED command for the human to run, never executed by you.
+Run the full test suite once more. If the epic description carries a `redmine:` line, follow it now (close the issue per the redmine skill). Summarize: beads closed, commits made (with ids), any follow-ups filed as beads, and residual risks that need human hands-on attention; end the report with one line: `Invariants: held` or the invariant that broke and where. Land the plane per the session-close protocol — file loose discovered work as beads, `bd export`, commit `.beads/`. Anything requiring push or merge authority is reported as a PROPOSED command for the human to run, never executed by you.
 
 ## Invariants
 - At most 2 beads in flight, only when eligible.
