@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.1"
+DOMESTIQUE_VERSION="0.3.2"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -48,7 +48,7 @@ Plans, bead descriptions, and delegation briefs are executed by a separate model
 3. Dispatch each implementer with `isolation: "worktree"`, a precise brief, and the bead id. Check `bd label list <id>` first; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). Issue both dispatches of a batch in one response.
 4. When an implementer returns, dispatch the `reviewer` subagent into that same worktree with the bead id and its done-criteria. The reviewer inspects the real diff, reads the changed files, and runs the tests in a fresh context — judging the work against the done-criteria, not against the implementer's summary — and returns a pass/fail verdict. While implementers run, prepare the next brief or the reviewer dispatch; dispatch each reviewer as soon as its own implementer returns rather than waiting for the whole batch. Do not start a third bead.
 5. Adjudicate per bead; the beads of a batch have independent fates.
-   - PASS → commit inside that worktree (one commit, bead id in the message), merge the worktree branch into the epic branch, remove the worktree, `bd close`.
+   - PASS → commit inside that worktree (one commit, bead id in the message; if the epic description carries a `redmine: #<n>` line the message ends with `refs #<n>`), merge the worktree branch into the epic branch with `--no-ff` and the same `refs #<n>` in the merge message, remove the worktree, `bd close`.
    - Gaps → one fix pass in the same worktree, then re-review; a second failure stops the batch.
    - Conflicting or ambiguous reports → read the diff yourself; otherwise do not.
 6. After every bead of the batch has landed, run all tests once on the epic branch.
@@ -252,7 +252,7 @@ For each batch:
 5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). When a batch has two beads, issue both implementer dispatches in one response.
 6. Dispatch each `reviewer` subagent into its bead's worktree with the bead id and its done-criteria. The reviewer runs the full suite and reads the diff itself; its verdict, not the implementer's summary, decides. Dispatch a reviewer as soon as its implementer returns; while one bead is under review, the other may still be implementing. Never start a third bead.
 7. Adjudicate per bead; the beads of a batch have independent fates:
-   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). If the epic description carries a `redmine: #<n>` line, the commit message ends with `refs #<n>`. Merge that worktree branch into the epic branch, remove the worktree, then `bd close <id>`.
+   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). If the epic description carries a `redmine: #<n>` line, the commit message ends with `refs #<n>`. Merge that worktree branch into the epic branch with `--no-ff` and the same `refs #<n>` in the merge message, remove the worktree, then `bd close <id>`.
    - Reviewer reports gaps → route at most one fix pass back into the same worktree, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it.
 8. Once every bead of the batch has landed or stopped, run all tests on the epic branch.
 9. Next batch.

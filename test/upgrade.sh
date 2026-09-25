@@ -149,6 +149,8 @@ scenario_fresh_install() {
   check "goal.md appends review-fail notes" grep -qF -- '--append-notes' "$t/.claude/commands/goal.md"
   check "goal.md ends redmine bead commits with refs #n" grep -qF 'the commit message ends with `refs #<n>`' "$t/.claude/commands/goal.md"
   check "goal.md closes the redmine issue on completion" grep -qF 'close the issue per the redmine skill' "$t/.claude/commands/goal.md"
+  check "CLAUDE.md merges with --no-ff and refs #n" grep -qF 'with `--no-ff` and the same `refs #<n>` in the merge message' "$t/CLAUDE.md"
+  check "goal.md merges with --no-ff and refs #n" grep -qF 'with `--no-ff` and the same `refs #<n>` in the merge message' "$t/.claude/commands/goal.md"
   check "drain.md has batch" grep -qF 'batch' "$t/.claude/commands/drain.md"
   check "drain.md has isolation" grep -qF 'isolation' "$t/.claude/commands/drain.md"
   check "drain.md has merge conflict" grep -qF 'merge conflict' "$t/.claude/commands/drain.md"
