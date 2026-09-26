@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.2"
+DOMESTIQUE_VERSION="0.3.3"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -193,6 +193,8 @@ Say in one line when you are about to create the first bead, and again when you 
 Rules for a good decomposition:
 - Create one epic for the goal:
   `bd create "<goal>" -t epic -p 1 --description "<why + high-level design>"`
+  Then append the branch rule to its description (read it back with `bd show <epic-id> --json` first):
+  `Branch: epic/<epic-id> — all bead commits land there; merged to main only via a pull request opened at epic completion, never a direct push.`
 - Break it into **bounded tasks** — each completable by a fresh Sonnet session in a single pass. A task has one clear deliverable and a testable done-criterion. If it needs more than that, split it.
   `bd create "<task>" -t task -p <2-3> --parent <epic-id> --description $'Files: <paths>\nShared-infra: no\n<input, output, done-criteria>'`
 - Every task description must begin with a `Files:` line listing the paths the task may touch, followed by a `Shared-infra: yes|no` line (yes when it touches build config, test harness, schema, lockfiles, or CI). If paths cannot be known at planning time write `Files: unknown`; such beads always run solo.
@@ -241,7 +243,7 @@ argument-hint: <epic-id>
 Drive epic $ARGUMENTS to completion, unattended, within the bounds below. You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking "Want me to…?" or "Shall I…?" will block the work. For reversible actions that follow from the original request, proceed without asking. Stop only for destructive actions or genuine scope changes the user must decide. The stop conditions listed below are the complete list of such cases. Before ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ("I'll…", "let me know when…"), do that work now with tool calls. This invocation is your explicit authorization to skip the normal "stop and report before dispatching the next batch" rule from CLAUDE.md — but that authorization is scoped and time-limited: it covers only beads under epic $ARGUMENTS, and it expires the instant the epic completes or any stop condition below fires. It never carries to another epic or a later session. This command is also installed as `/drain` — an alias with identical semantics.
 
 ## Branch isolation
-Before touching anything, create or switch to a dedicated branch for this epic (e.g. derived from `$ARGUMENTS`, such as `epic/$ARGUMENTS`). Never commit to the default branch for the rest of this run. Every bead runs in its own git worktree: the loop merges worktree branches into the epic branch only, and never merges the epic branch anywhere or pushes it. The human reviews and merges the epic branch by hand. In guest installs (domestique installed with `--guest` into a repo you don't own), this also holds: unattended `/goal` commits stay on local branches that are never pushed.
+Before touching anything, create or switch to a dedicated branch for this epic (e.g. derived from `$ARGUMENTS`, such as `epic/$ARGUMENTS`). Never commit to the default branch for the rest of this run. Every bead runs in its own git worktree: the loop merges worktree branches into the epic branch only and never merges the epic branch anywhere. At completion (below) the epic branch is pushed and a pull request opened; the human reviews and merges that PR. In guest installs (domestique installed with `--guest` into a repo you don't own), no push happens: unattended `/goal` commits stay on local branches and the PR step is reported as a PROPOSED command. If the epic description carries a `redmine: #<n>` line and issue #n is in status Feedback, set it to In Progress with a one-line note stating what was decided in the terminal, per the redmine skill — a one-time check at start, never a poll.
 
 ## Per-batch loop
 For each batch:
@@ -249,11 +251,12 @@ For each batch:
 2. Pick the highest-priority unblocked bead. Add a second bead only if all five Parallel eligibility rules from CLAUDE.md hold — at most 2 beads in flight, never more. Write the one-line low-interference justification in your batch line: at each batch start write `batch N: <ids> (<models>) — <justification>`, and at each batch end `batch N: <id> closed / fix-pass / stopped`. These lines are the run log; they are printed in your report text to the human, one line at batch start and one at batch end.
 3. Assert a clean working tree on the epic branch before starting the batch. If it's dirty, stop and report — do not stash, reset, or commit it.
 4. Claim every bead in the batch (`bd update <id> --claim`).
-5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). When a batch has two beads, issue both implementer dispatches in one response.
-6. Dispatch each `reviewer` subagent into its bead's worktree with the bead id and its done-criteria. The reviewer runs the full suite and reads the diff itself; its verdict, not the implementer's summary, decides. Dispatch a reviewer as soon as its implementer returns; while one bead is under review, the other may still be implementing. Never start a third bead.
+5. Dispatch each `implementer` subagent with `isolation: "worktree"` and a precise brief built from the bead's description, its `Files:` section, and its done-criteria. Before dispatching, check `bd label list <id>`; if `model:opus` is present, pass a model override of opus on that dispatch, otherwise use the default (Sonnet). When a batch has two beads, issue both implementer dispatches in one response. When an implementer returns and the epic carries a `redmine: #<n>` line, post one plain-English progress note on issue #n per the redmine skill (what the product gained, bead id in parentheses; no technical detail).
+6. Dispatch each `reviewer` subagent into its bead's worktree with the bead id and its done-criteria. The reviewer runs the full suite and reads the diff itself; its verdict, not the implementer's summary, decides. Dispatch a reviewer as soon as its implementer returns; while one bead is under review, the other may still be implementing. Never start a third bead. When a reviewer returns, post its verdict as one progress note the same way.
 7. Adjudicate per bead; the beads of a batch have independent fates:
-   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). If the epic description carries a `redmine: #<n>` line, the commit message ends with `refs #<n>`. Merge that worktree branch into the epic branch with `--no-ff` and the same `refs #<n>` in the merge message, remove the worktree, then `bd close <id>`.
-   - Reviewer reports gaps → route at most one fix pass back into the same worktree, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it.
+   - Reviewer PASS → commit inside that worktree, message including the bead id, one bead per commit (never batched). If the epic description carries a `redmine: #<n>` line, the commit message ends with `refs #<n>`. Merge that worktree branch into the epic branch with `--no-ff` and the same `refs #<n>` in the merge message, remove the worktree, then `bd close <id>`. Progress note: bead merged and closed.
+   - Reviewer reports gaps → route at most one fix pass back into the same worktree, then re-review. A second failed review on the same bead is a stop condition (see below) — do not loop further on it. Progress note when the fix pass starts.
+   Every other event the human would want to see also gets one progress note: a follow-up bead filed, a stop condition fired, a scope override.
 8. Once every bead of the batch has landed or stopped, run all tests on the epic branch.
 9. Next batch.
 
@@ -264,15 +267,16 @@ Stop and report after 15 beads closed in this run, even if the epic isn't finish
 Keep run state in beads, not in context: on each close, `bd close <id> --reason "run <n>/15"`; on each failed review, append two lines to the bead's notes with `bd update <id> --append-notes` (appending, not overwriting, so a second failure doesn't clobber the first diagnostic) — first the review diagnostic (what's wrong), then the counter (`review-fail <n>`). If your context is compacted, re-derive the closed count and per-bead failure counts from `bd` before the next batch.
 
 ## Stop conditions — halt immediately, do not dispatch further work, and report to the human
+When a stop condition fires and the epic carries a `redmine: #<n>` line, the stop progress note goes in the same PUT that sets the issue to Feedback (status_id 4), per the redmine skill.
 - A bead fails review twice: leave it `in_progress` with notes on what's wrong and leave its worktree in place for the human; do not force a third pass.
 - A merge conflict while integrating a worktree branch into the epic branch: never auto-resolve it. Leave the worktree and its branch in place, and report both paths.
 - A full test run fails at any point — post-batch on the epic branch or during a review: stop immediately; do not attempt to attribute the cause yourself.
 - A decision needs operator input: spec ambiguity, scope change, or UX/semantics not already settled by the bead's description.
-- Anything requires a push, a config change, or touching files outside the project — these are visible to others or hard to reverse, so they are the human's call.
+- Anything requires a push, a config change, or touching files outside the project — these are visible to others or hard to reverse, so they are the human's call. The one exception is pushing the epic branch and opening its pull request at Completion below.
 - Two consecutive infrastructure/API errors: before concluding it's an API outage, check `bd memories` for machine-sleep or known-flake notes.
 
 ## On epic completion (or hitting the ceiling)
-Run the full test suite once more. If the epic description carries a `redmine:` line, follow it now (close the issue per the redmine skill). Summarize: beads closed, commits made (with ids), any follow-ups filed as beads, and residual risks that need human hands-on attention; end the report with one line: `Invariants: held` or the invariant that broke and where. Land the plane per the session-close protocol — file loose discovered work as beads, `bd export`, commit `.beads/`. Anything requiring push or merge authority is reported as a PROPOSED command for the human to run, never executed by you.
+Run the full test suite once more. Then push the epic branch and open the pull request: `git push -u origin epic/$ARGUMENTS` and `gh pr create --base main --head epic/$ARGUMENTS --title "<what the product gained>" --body "<release-notes style: what changed for the user, beads closed, refs #<n> if redmine>"`; the PR title and body become the release notes, so write them for the user, not the developer. Never merge the PR yourself. If the epic description carries a `redmine:` line, set the issue to Resolved per the redmine skill with the branch and the PR link (Closed is only for a verified live deploy). Summarize: beads closed, commits made (with ids), the PR link, any follow-ups filed as beads, and residual risks that need human hands-on attention; end the report with one line: `Invariants: held` or the invariant that broke and where. Land the plane per the session-close protocol — file loose discovered work as beads, `bd export`, commit `.beads/` (skip if gitignored). Merging the PR, and anything else requiring push authority, is reported as a PROPOSED command for the human to run, never executed by you.
 
 ## Invariants
 - At most 2 beads in flight, only when eligible.
