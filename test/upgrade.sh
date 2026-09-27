@@ -343,6 +343,85 @@ scenario_conflict_plain() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario 5a: conflict rerun — still conflicts, one .bak, marker kept
+# ---------------------------------------------------------------------------
+scenario_conflict_rerun_still_conflicts() {
+  local t="$WORKROOT/s5a"; mkdir -p "$t"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  sed -i.orig \
+    's/Blockers or decisions the orchestrator should know about/Blockers or decisions the orchestrator should know about (conflicting-user-edit)/' \
+    "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig"
+
+  local before="$WORKROOT/s5a.before" marker="$t/$BASE_IMPL_REL.conflict" rc marker1
+  cp "$t/$IMPL_REL" "$before"
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+  check "first run exit 3" test "$rc" -eq 3
+  marker1="$(cat "$marker" 2>/dev/null)"
+
+  # Delete only the .new, leave the live file as is, and re-run.
+  rm -f "$t/$IMPL_REL.new"
+  sleep 1.1   # a new TS second, so a second .bak would get its own name
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+
+  local bakcount
+  bakcount="$(find "$(dirname "$t/$IMPL_REL")" -maxdepth 1 -name 'implementer.md.bak.*' | wc -l | tr -d ' ')"
+  check "second run exit 3" test "$rc" -eq 3
+  check ".new rewritten with conflict markers" grep -q "<<<<<<<" "$t/$IMPL_REL.new"
+  check "exactly one .bak" test "$bakcount" = "1"
+  check "live file byte-unchanged" cmp -s "$before" "$t/$IMPL_REL"
+  check "base not advanced" bash -c '! grep -q "(v2)" "$1"' _ "$t/$BASE_IMPL_REL"
+  check "marker present" test -e "$marker"
+  check "marker content unchanged" test -n "$marker1" -a "$(cat "$marker" 2>/dev/null)" = "$marker1"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 5b: hand-resolved conflict advances the base
+# ---------------------------------------------------------------------------
+scenario_conflict_resolved_by_hand() {
+  local t="$WORKROOT/s5b" ref="$WORKROOT/s5b-ref"; mkdir -p "$t" "$ref"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  sed -i.orig \
+    's/Blockers or decisions the orchestrator should know about/Blockers or decisions the orchestrator should know about (conflicting-user-edit)/' \
+    "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig"
+
+  local rc out
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+  check "conflict run exit 3" test "$rc" -eq 3
+
+  # Resolve by hand: take upstream, re-apply the local edit, drop the .new.
+  "$V2" "$ref" >/dev/null 2>&1
+  cp "$ref/$IMPL_REL" "$t/$IMPL_REL"
+  sed -i.orig '/(v2)/s/$/ (conflicting-user-edit)/' "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig" "$t/$IMPL_REL.new"
+  local before="$WORKROOT/s5b.before"
+  cp "$t/$IMPL_REL" "$before"
+
+  out="$("$V2" "$t" 2>&1)"; rc=$?
+
+  local bakcount
+  bakcount="$(find "$(dirname "$t/$IMPL_REL")" -maxdepth 1 -name 'implementer.md.bak.*' | wc -l | tr -d ' ')"
+  check "exit 0" test "$rc" -eq 0
+  check "Resolved group reported" bash -c 'printf "%s" "$1" | grep -q "Resolved:"' _ "$out"
+  check "implementer.md reported resolved" bash -c 'printf "%s" "$1" | grep -q "implementer.md (conflict resolved by hand; base advanced, local edits preserved)"' _ "$out"
+  check "base equals the fresh v2 emit" cmp -s "$t/$BASE_IMPL_REL" "$ref/$IMPL_REL"
+  check "marker removed" test ! -e "$t/$BASE_IMPL_REL.conflict"
+  check "live file byte-unchanged" cmp -s "$before" "$t/$IMPL_REL"
+  check "still one .bak" test "$bakcount" = "1"
+  check "no .new" test ! -e "$t/$IMPL_REL.new"
+
+  local hash_before hash_after
+  hash_before="$(treehash "$t")"
+  out="$("$V2" "$t" 2>&1)"
+  hash_after="$(treehash "$t")"
+  check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
+  check "rerun reported as Skipped (local edits preserved)" bash -c 'printf "%s" "$1" | grep -q "(local edits preserved, nothing to apply)"' _ "$out"
+}
+
+# ---------------------------------------------------------------------------
 # Scenario 6: CLAUDE.md in-block edit preserved + outside-marker edit intact
 # ---------------------------------------------------------------------------
 scenario_claude_md_inblock_preserved() {
@@ -571,6 +650,8 @@ run_scenario "upgrade preserves a local edit (plain file)"      scenario_upgrade
 run_scenario "rerun after merge reports Skipped, no .bak"       scenario_merge_noop_reports_skipped
 run_scenario "identical file refreshes stale base + manifest"  scenario_identical_refreshes_stale_base
 run_scenario "conflict (plain file)"                            scenario_conflict_plain
+run_scenario "conflict rerun: still conflicts, one .bak, marker kept" scenario_conflict_rerun_still_conflicts
+run_scenario "hand-resolved conflict advances the base"         scenario_conflict_resolved_by_hand
 run_scenario "CLAUDE.md in-block edit preserved"                scenario_claude_md_inblock_preserved
 run_scenario "CLAUDE.md conflict"                               scenario_claude_md_conflict
 run_scenario "legacy fallback (no snapshot)"                    scenario_legacy_fallback

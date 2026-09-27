@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.5"
+DOMESTIQUE_VERSION="0.3.6"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -992,6 +992,7 @@ SUM_SKIPPED=()
 SUM_MERGED=()
 SUM_CONFLICT=()
 SUM_ADOPTED=()
+SUM_RESOLVED=()
 # --uninstall-only accumulators.
 SUM_REMOVED=()
 SUM_KEPT=()
@@ -1057,6 +1058,8 @@ snapshot_plain() {
   fi
   mkdir -p "$(dirname "$basepath")"
   cp "$content" "$basepath"
+  # Any base advance supersedes a recorded conflict.
+  rm -f "$basepath.conflict"
 }
 
 # snapshot_claude_block <content-file>
@@ -1091,19 +1094,24 @@ managed_files_list() {
   printf '%s' "$out"
 }
 
+# file_sha256 <path> — print the hex sha256 of <path>, or "unavailable" when
+# no sha256sum/shasum exists or hashing fails. Never fails the run.
+file_sha256() {
+  local sha=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha="$(sha256sum "$1" 2>/dev/null | awk '{print $1}')" || sha=""
+  elif command -v shasum >/dev/null 2>&1; then
+    sha="$(shasum -a 256 "$1" 2>/dev/null | awk '{print $1}')" || sha=""
+  fi
+  printf '%s\n' "${sha:-unavailable}"
+}
+
 # write_manifest — flat key=value manifest describing the snapshot.
 write_manifest() {
   local manifest="$SNAPSHOT_DIR/manifest" ref sha
   ref="$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null)" || ref="unknown"
   [ -z "$ref" ] && ref="unknown"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha="$(sha256sum "$0" 2>/dev/null | awk '{print $1}')" || sha=""
-  elif command -v shasum >/dev/null 2>&1; then
-    sha="$(shasum -a 256 "$0" 2>/dev/null | awk '{print $1}')" || sha=""
-  else
-    sha=""
-  fi
-  [ -z "$sha" ] && sha="unavailable"
+  sha="$(file_sha256 "$0")"
   {
     printf 'snapshot_format=1\n'
     printf 'platform=%s\n' "$CURRENT_PROVIDER"
@@ -1195,6 +1203,22 @@ install_plain() {
     return 0
   fi
 
+  # A conflict marker (<base>.conflict, holding the live file's sha256 at
+  # conflict time) plus: .new gone, live file changed, no conflict-marker
+  # lines -> the user resolved the conflict by hand. Accept it: advance the
+  # base to upstream, leave the live file as is.
+  if [ -e "$basepath.conflict" ] && [ ! -e "$dest.new" ] \
+     && [ "$(file_sha256 "$dest")" != "$(cat "$basepath.conflict")" ] \
+     && ! grep -qE '^(<{7}|>{7}|={7}|\|{7})( |$)' "$dest"; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      note_dry "resolve $dest (conflict resolved by hand; would advance base, leave file unchanged)"
+    else
+      snapshot_plain "$dest" "$staged"
+    fi
+    SUM_RESOLVED+=("$dest (conflict resolved by hand; base advanced, local edits preserved)")
+    return 0
+  fi
+
   # 3-way merge: ours=$dest, base=$basepath, theirs=$staged.
   local merged rc=0
   merged="$TMPDIR_WORK/merged"
@@ -1228,6 +1252,8 @@ install_plain() {
   # and force a non-zero exit for the whole run.
   CONFLICT_OCCURRED=1
   local newfile="$dest.new" backup="$dest.bak.$TS" kind="conflict"
+  local marker="$basepath.conflict" ours_sha
+  ours_sha="$(file_sha256 "$dest")"
   if [ "$rc" -ge 128 ]; then
     kind="error"
     echo "Error: git merge-file failed unexpectedly for $dest (exit $rc)." >&2
@@ -1235,11 +1261,20 @@ install_plain() {
     echo "Warning: merge conflict in $dest ($rc hunk(s)) — see $newfile" >&2
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
-    note_dry "merge $dest ($kind) — would write $newfile, back up $dest -> $backup, leave $dest untouched"
+    if [ -e "$marker" ] && [ "$(cat "$marker")" = "$ours_sha" ]; then
+      note_dry "merge $dest ($kind) — would write $newfile, skip backup (unchanged since the last conflict), record $marker, leave $dest untouched"
+    else
+      note_dry "merge $dest ($kind) — would write $newfile, back up $dest -> $backup, record $marker, leave $dest untouched"
+    fi
   else
     cp "$merged" "$newfile"
-    cp "$dest" "$backup"
-    SUM_BACKEDUP+=("$backup")
+    # One .bak per distinct live file: skip it when the file is unchanged
+    # since the conflict already recorded in $marker.
+    if [ ! -e "$marker" ] || [ "$(cat "$marker")" != "$ours_sha" ]; then
+      cp "$dest" "$backup"
+      SUM_BACKEDUP+=("$backup")
+    fi
+    printf '%s\n' "$ours_sha" > "$marker"
   fi
   SUM_CONFLICT+=("$dest ($kind; see $newfile)")
 }
@@ -2192,6 +2227,7 @@ if [ "$DRY_RUN" -eq 1 ]; then echo "Summary (planned):"; else echo "Summary:"; f
 [ "${#SUM_UPDATED[@]}"  -gt 0 ] && print_group "Updated"    "${SUM_UPDATED[@]}"
 [ "${#SUM_MERGED[@]}"   -gt 0 ] && print_group "Merged"     "${SUM_MERGED[@]}"
 [ "${#SUM_ADOPTED[@]}"  -gt 0 ] && print_group "Adopted"    "${SUM_ADOPTED[@]}"
+[ "${#SUM_RESOLVED[@]}" -gt 0 ] && print_group "Resolved"   "${SUM_RESOLVED[@]}"
 [ "${#SUM_BACKEDUP[@]}" -gt 0 ] && print_group "Backed up"  "${SUM_BACKEDUP[@]}"
 [ "${#SUM_SKIPPED[@]}"  -gt 0 ] && print_group "Skipped"    "${SUM_SKIPPED[@]}"
 [ "${#SUM_CONFLICT[@]}" -gt 0 ] && print_group "Conflicted" "${SUM_CONFLICT[@]}"
