@@ -244,6 +244,40 @@ scenario_upgrade_preserves_local_edit_plain() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario 4b: rerun after a clean merge reports Skipped, no .bak
+# ---------------------------------------------------------------------------
+scenario_merge_noop_reports_skipped() {
+  local t="$WORKROOT/s4b"; mkdir -p "$t"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  # Edit a DIFFERENT line than the one v2 changes.
+  sed -i.orig \
+    's/Never touch credentials, secrets, access controls, or destructive git operations\. Surface these to the orchestrator instead\./Never touch credentials, secrets, access controls, or destructive git operations. Surface these to the orchestrator instead. (user-edit)/' \
+    "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig"
+
+  local out
+  out="$("$V2" "$t" 2>&1)"
+  check "sanity: first rerun applies upstream (Merged)" bash -c 'printf "%s" "$1" | grep -q "Merged"' _ "$out"
+
+  local hash_before hash_after rc
+  hash_before="$(treehash "$t")"
+  out="$("$V2" "$t" 2>&1)"; rc=$?
+  hash_after="$(treehash "$t")"
+
+  check "exit 0" test "$rc" -eq 0
+  check "reported as Skipped (local edits preserved)" bash -c 'printf "%s" "$1" | grep -q "implementer.md (local edits preserved, nothing to apply)"' _ "$out"
+  check "no Merged/Updated/Created/Conflicted reported" bash -c '
+    ! printf "%s" "$1" | grep -Eq "^  (Created|Updated|Merged|Conflicted):"
+  ' _ "$out"
+  check "no .bak files" bash -c '! find "$1" -maxdepth 1 -name "implementer.md.bak.*" | grep -q .' _ "$(dirname "$t/$IMPL_REL")"
+  check "no .new files" bash -c '! find "$1" -maxdepth 1 -name "implementer.md.new" | grep -q .' _ "$(dirname "$t/$IMPL_REL")"
+  check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
+  check "user edit still present" grep -q "(user-edit)" "$t/$IMPL_REL"
+  check "upstream edit still present" grep -q "(v2)" "$t/$IMPL_REL"
+}
+
+# ---------------------------------------------------------------------------
 # Scenario 5: conflict (plain file) — same line edited on both sides
 # ---------------------------------------------------------------------------
 scenario_conflict_plain() {
@@ -492,6 +526,7 @@ run_scenario "fresh install"                                   scenario_fresh_in
 run_scenario "idempotent re-install"                            scenario_idempotent_reinstall
 run_scenario "upgrade, no local edits"                          scenario_upgrade_no_local_edits
 run_scenario "upgrade preserves a local edit (plain file)"      scenario_upgrade_preserves_local_edit_plain
+run_scenario "rerun after merge reports Skipped, no .bak"       scenario_merge_noop_reports_skipped
 run_scenario "conflict (plain file)"                            scenario_conflict_plain
 run_scenario "CLAUDE.md in-block edit preserved"                scenario_claude_md_inblock_preserved
 run_scenario "CLAUDE.md conflict"                               scenario_claude_md_conflict

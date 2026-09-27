@@ -225,7 +225,12 @@ to merge.
 **Identical case:** if `ours` == `base` == `theirs` (nothing changed on
 either side), or `ours` == `theirs` (independently converged), skip as
 today — no write, no backup, snapshot may still be refreshed defensively
-though it's already correct.
+though it's already correct. A clean 3-way merge whose result is
+byte-identical to `ours` (typically base == upstream, so the merge is a
+no-op) is likewise reported as **Skipped** ("local edits preserved, nothing
+to apply") and writes nothing: no file, no backup, and the base snapshot
+(and manifest) only when the base still lags upstream. A re-run after a
+successful merge therefore leaves the tree byte-identical.
 
 ---
 
