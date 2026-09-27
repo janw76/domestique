@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.7"
+DOMESTIQUE_VERSION="0.3.8"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -1003,6 +1003,18 @@ CONFLICT_OCCURRED=0
 
 note_dry() { [ "$DRY_RUN" -eq 1 ] && echo "  [dry-run] $*"; return 0; }
 
+# backup_path <candidate> — prints <candidate> if nothing exists there yet,
+# else the first free <candidate>-1, <candidate>-2, ... (never overwrites an
+# existing backup; -e only probes, it creates nothing, so dry-run is safe).
+backup_path() {
+  local candidate="$1" n=1
+  while [ -e "$candidate" ]; do
+    candidate="$1-$n"
+    n=$((n + 1))
+  done
+  printf '%s' "$candidate"
+}
+
 # print_group <label> <item...> — used by both the install and uninstall
 # summary printers. Hoisted here (from its original position just above the
 # install summary) so do_uninstall() can call it too.
@@ -1261,7 +1273,8 @@ install_plain() {
   # Either way: leave the live file untouched, do not advance the snapshot,
   # and force a non-zero exit for the whole run.
   CONFLICT_OCCURRED=1
-  local newfile="$dest.new" backup="$dest.bak.$TS" kind="conflict"
+  local newfile="$dest.new" backup kind="conflict"
+  backup="$(backup_path "$dest.bak.$TS")"
   local marker="$basepath.conflict" ours_sha
   ours_sha="$(file_sha256 "$dest")"
   if [ "$rc" -ge 128 ]; then
@@ -1485,7 +1498,8 @@ install_claude_md() {
               return 0
             fi
 
-            local backup="$dest.bak.$TS"
+            local backup
+            backup="$(backup_path "$dest.bak.$TS")"
             if [ "$DRY_RUN" -eq 1 ]; then
               note_dry "backup $dest -> $backup, then merge managed block (clean)"
             else
@@ -1507,7 +1521,8 @@ install_claude_md() {
           # snapshot, write the conflict-marked full file to dest.new, back
           # up the current live file, force a non-zero exit for the run.
           CONFLICT_OCCURRED=1
-          local newfile="$dest.new" backup2="$dest.bak.$TS" kind="conflict"
+          local newfile="$dest.new" backup2 kind="conflict"
+          backup2="$(backup_path "$dest.bak.$TS")"
           local marker="$basepath.conflict" ours_sha
           ours_sha="$(file_sha256 "$dest")"
           if [ "$rc" -ge 128 ]; then
@@ -1583,7 +1598,8 @@ install_claude_md() {
     return 0
   fi
 
-  local backup="$dest.bak.$TS"
+  local backup
+  backup="$(backup_path "$dest.bak.$TS")"
   if [ "$DRY_RUN" -eq 1 ]; then
     note_dry "backup $dest -> $backup, then update managed block"
   else
@@ -1847,7 +1863,8 @@ do_uninstall() {
       SUM_REMOVED+=("$dest (modified, --force)")
     else
       anything_done=1
-      local kept="$dest.uninstalled.$TS"
+      local kept
+      kept="$(backup_path "$dest.uninstalled.$TS")"
       if [ "$DRY_RUN" -eq 1 ]; then
         note_dry "keep $dest (modified) -> would rename to $kept"
       else
@@ -1954,7 +1971,7 @@ UNINSTALL_FILES
     ' "$dest" > "$result"
 
     if [ "$modified" -eq 1 ]; then
-      backup="$dest.bak.$TS"
+      backup="$(backup_path "$dest.bak.$TS")"
       if [ "$DRY_RUN" -eq 1 ]; then
         note_dry "backup $dest -> $backup (managed block was modified)"
       else

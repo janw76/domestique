@@ -382,7 +382,6 @@ scenario_conflict_rerun_still_conflicts() {
 
   # Delete only the .new, leave the live file as is, and re-run.
   rm -f "$t/$IMPL_REL.new"
-  sleep 1.1   # a new TS second, so a second .bak would get its own name
   "$V2" "$t" >/dev/null 2>&1; rc=$?
 
   local bakcount
@@ -394,6 +393,46 @@ scenario_conflict_rerun_still_conflicts() {
   check "base not advanced" bash -c '! grep -q "(v2)" "$1"' _ "$t/$BASE_IMPL_REL"
   check "marker present" test -e "$marker"
   check "marker content unchanged" test -n "$marker1" -a "$(cat "$marker" 2>/dev/null)" = "$marker1"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 5d: backups never overwrite — two conflict backups due in the same
+# TS second (no sleep between runs) must both survive, distinctly named.
+# ---------------------------------------------------------------------------
+scenario_backups_never_overwrite() {
+  local t="$WORKROOT/s5d"; mkdir -p "$t"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  sed -i.orig \
+    's/Blockers or decisions the orchestrator should know about/Blockers or decisions the orchestrator should know about (conflicting-user-edit)/' \
+    "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig"
+
+  local rc bakdir="$(dirname "$t/$IMPL_REL")"
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+  check "first run exit 3" test "$rc" -eq 3
+  check "exactly one .bak after first run" \
+    bash -c 'test "$(find "$1" -maxdepth 1 -name "implementer.md.bak.*" | wc -l | tr -d " ")" = "1"' _ "$bakdir"
+
+  # Change the live file so its hash no longer matches the conflict marker —
+  # a second backup is now due — and rerun immediately, with NO sleep, so a
+  # same-second collision is forced whenever the clock doesn't happen to
+  # tick over on its own. (.new is deliberately left in place: deleting it
+  # with no other change would flip the merge into the hand-resolved path,
+  # which is a different code path than the still-conflicting rerun this
+  # scenario targets.)
+  echo "# second edit" >> "$t/$IMPL_REL"
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+
+  local baks bakcount
+  baks="$(find "$bakdir" -maxdepth 1 -name 'implementer.md.bak.*')"
+  bakcount="$(printf '%s\n' "$baks" | grep -c .)"
+  check "second run exit 3" test "$rc" -eq 3
+  check "exactly two .bak files, whatever the clock did" test "$bakcount" = "2"
+  check "the two backups differ" bash -c '
+    a="$(printf "%s\n" "$1" | sed -n 1p)"; b="$(printf "%s\n" "$1" | sed -n 2p)"
+    ! cmp -s "$a" "$b"
+  ' _ "$baks"
 }
 
 # ---------------------------------------------------------------------------
@@ -555,7 +594,6 @@ scenario_claude_md_conflict_rerun_dedupes_bak() {
 
   # Delete only the .new, leave the live file as is, and re-run.
   rm -f "$t/$CLAUDE_REL.new"
-  sleep 1.1   # a new TS second, so a second .bak would get its own name
   "$V2" "$t" >/dev/null 2>&1; rc=$?
 
   local bakcount
@@ -839,6 +877,7 @@ run_scenario "rerun after merge reports Skipped, no .bak"       scenario_merge_n
 run_scenario "identical file refreshes stale base + manifest"  scenario_identical_refreshes_stale_base
 run_scenario "conflict (plain file)"                            scenario_conflict_plain
 run_scenario "conflict rerun: still conflicts, one .bak, marker kept" scenario_conflict_rerun_still_conflicts
+run_scenario "two backups in one second both survive"                scenario_backups_never_overwrite
 run_scenario "hand-resolved conflict advances the base"         scenario_conflict_resolved_by_hand
 run_scenario "hand-resolved at v2, upgrade to v3 merges v3"      scenario_resolved_then_newer_upstream_plain
 run_scenario "CLAUDE.md in-block edit preserved"                scenario_claude_md_inblock_preserved
