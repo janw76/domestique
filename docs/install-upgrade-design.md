@@ -194,15 +194,23 @@ rc=$?
 
 **Resolution detection:** on a conflict or error, the installer also writes
 a marker file `<base>.conflict` beside the base snapshot, holding the sha256
-of the live file at conflict time. On a later run, before merging, a file
-counts as resolved by hand when all three hold: `<dest>.new` is gone, the
-live file's sha256 differs from the marker, and the live file has no
-conflict-marker lines (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`). Then the
-base advances to `theirs`, the live file is left as is, and the file is
-reported under **Resolved** (exit 0). If the conflict recurs on a live file
+of the live file at conflict time, and saves the emit the conflict was
+recorded against as `<base>.conflict.theirs`. On a later run, before
+merging, a file counts as resolved by hand when all three hold:
+`<dest>.new` is gone, the live file's sha256 differs from the marker, and
+the live file has no conflict-marker lines (`<<<<<<<`, `|||||||`,
+`=======`, `>>>>>>>`). Then the ordinary 3-way merge runs with
+`<base>.conflict.theirs` as its base (a marker without a theirs file,
+recorded by an older version, falls back to the current emit). When upstream has not
+moved, the merge result equals the live file: the file is left as is, the
+base advances to `theirs`, and it is reported under **Resolved** (exit 0).
+When a newer upstream was released since the conflict, its changes merge
+normally: a clean merge is written and reported under **Resolved** as
+"newer upstream merged in"; an overlapping change conflicts again. If the
+conflict recurs on a live file
 whose sha256 still matches the marker, `.new` is rewritten but no second
 `.bak` is taken. Any base advance (merge, identical refresh, `--force`,
-ADOPT, no-op skip) deletes the marker. Caveat: on a host with neither
+ADOPT, no-op skip) deletes both marker files (`.conflict` and `.conflict.theirs`). Caveat: on a host with neither
 `sha256sum` nor `shasum` both hashes read `unavailable` and compare equal,
 so a resolution is never detected there.
 
@@ -294,7 +302,11 @@ block, adapted to *capture* it instead). `base-block` is
   `CLAUDE.md.new`. Warn, don't advance the snapshot, set non-zero exit.
   Resolution detection and `.bak` dedupe apply to the block exactly as
   described in §2, keyed on the sha256 of the whole live file and a marker
-  `<POLICY_DEST>.block.conflict` beside the block snapshot.
+  `<POLICY_DEST>.block.conflict` beside the block snapshot; the resolution
+  run merges the block against the policy body the conflict was recorded
+  against (`<POLICY_DEST>.block.conflict.theirs`, falling back to the
+  current emit for an older marker), so a newer upstream merges normally and
+  may report "newer upstream merged in" or conflict again.
 - **No markers yet (Case C, first-time install of the block into an existing
   file) or no file at all (Case A):** unchanged from today — no merge is
   possible or needed since there's no prior `ours-block`; write/append as
