@@ -471,6 +471,85 @@ scenario_claude_md_conflict() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario 7a: CLAUDE.md conflict rerun — one .bak, marker kept
+# ---------------------------------------------------------------------------
+scenario_claude_md_conflict_rerun_dedupes_bak() {
+  local t="$WORKROOT/s7a"; mkdir -p "$t"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  sed -i.orig \
+    "s/Do not drain the queue unattended unless explicitly told to\\./Do not drain the queue unattended unless explicitly told to (conflicting-edit)./" \
+    "$t/$CLAUDE_REL"
+  rm -f "$t/$CLAUDE_REL.orig"
+
+  local before="$WORKROOT/s7a.before" marker="$t/$BASE_CLAUDE_BLOCK_REL.conflict" rc marker1
+  cp "$t/$CLAUDE_REL" "$before"
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+  check "first run exit 3" test "$rc" -eq 3
+  marker1="$(cat "$marker" 2>/dev/null)"
+
+  # Delete only the .new, leave the live file as is, and re-run.
+  rm -f "$t/$CLAUDE_REL.new"
+  sleep 1.1   # a new TS second, so a second .bak would get its own name
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+
+  local bakcount
+  bakcount="$(find "$t" -maxdepth 1 -name 'CLAUDE.md.bak.*' | wc -l | tr -d ' ')"
+  check "second run exit 3" test "$rc" -eq 3
+  check "CLAUDE.md.new rewritten with conflict markers" grep -q "<<<<<<<" "$t/$CLAUDE_REL.new"
+  check "exactly one .bak" test "$bakcount" = "1"
+  check "live CLAUDE.md unchanged" cmp -s "$before" "$t/$CLAUDE_REL"
+  check "block base not advanced" bash -c '! grep -q "(v2-policy)" "$1"' _ "$t/$BASE_CLAUDE_BLOCK_REL"
+  check "marker present" test -e "$marker"
+  check "marker content unchanged" test -n "$marker1" -a "$(cat "$marker" 2>/dev/null)" = "$marker1"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 7b: hand-resolved CLAUDE.md conflict advances the block base
+# ---------------------------------------------------------------------------
+scenario_claude_md_conflict_resolved_by_hand() {
+  local t="$WORKROOT/s7b" ref="$WORKROOT/s7b-ref"; mkdir -p "$t" "$ref"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  sed -i.orig \
+    "s/Do not drain the queue unattended unless explicitly told to\\./Do not drain the queue unattended unless explicitly told to (conflicting-edit)./" \
+    "$t/$CLAUDE_REL"
+  rm -f "$t/$CLAUDE_REL.orig"
+
+  local rc out
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+  check "conflict run exit 3" test "$rc" -eq 3
+
+  # Resolve by hand: take upstream, re-apply the local edit, drop the .new.
+  "$V2" "$ref" >/dev/null 2>&1
+  cp "$ref/$CLAUDE_REL" "$t/$CLAUDE_REL"
+  sed -i.orig '/(v2-policy)/s/$/ (conflicting-edit)/' "$t/$CLAUDE_REL"
+  rm -f "$t/$CLAUDE_REL.orig" "$t/$CLAUDE_REL.new"
+  local before="$WORKROOT/s7b.before"
+  cp "$t/$CLAUDE_REL" "$before"
+
+  out="$("$V2" "$t" 2>&1)"; rc=$?
+
+  local bakcount
+  bakcount="$(find "$t" -maxdepth 1 -name 'CLAUDE.md.bak.*' | wc -l | tr -d ' ')"
+  check "exit 0" test "$rc" -eq 0
+  check "Resolved group reported" bash -c 'printf "%s" "$1" | grep -q "Resolved:"' _ "$out"
+  check "CLAUDE.md reported resolved" bash -c 'printf "%s" "$1" | grep "CLAUDE.md" | grep -q "conflict resolved by hand; base advanced, local edits preserved"' _ "$out"
+  check "block base equals the fresh v2 emit" cmp -s "$t/$BASE_CLAUDE_BLOCK_REL" "$ref/$BASE_CLAUDE_BLOCK_REL"
+  check "marker removed" test ! -e "$t/$BASE_CLAUDE_BLOCK_REL.conflict"
+  check "live CLAUDE.md unchanged" cmp -s "$before" "$t/$CLAUDE_REL"
+  check "still one .bak" test "$bakcount" = "1"
+  check "no CLAUDE.md.new" test ! -e "$t/$CLAUDE_REL.new"
+
+  local hash_before hash_after
+  hash_before="$(treehash "$t")"
+  out="$("$V2" "$t" 2>&1)"
+  hash_after="$(treehash "$t")"
+  check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
+  check "rerun reported as managed block already current" bash -c 'printf "%s" "$1" | grep -q "(managed block already current)"' _ "$out"
+}
+
+# ---------------------------------------------------------------------------
 # Scenario 8: legacy adopt — no snapshot present, differing file is adopted
 # (local edit preserved, no clobber) rather than backed up + overwritten.
 # ---------------------------------------------------------------------------
@@ -654,6 +733,8 @@ run_scenario "conflict rerun: still conflicts, one .bak, marker kept" scenario_c
 run_scenario "hand-resolved conflict advances the base"         scenario_conflict_resolved_by_hand
 run_scenario "CLAUDE.md in-block edit preserved"                scenario_claude_md_inblock_preserved
 run_scenario "CLAUDE.md conflict"                               scenario_claude_md_conflict
+run_scenario "CLAUDE.md conflict rerun: one .bak, marker kept"  scenario_claude_md_conflict_rerun_dedupes_bak
+run_scenario "hand-resolved CLAUDE.md conflict advances the block base" scenario_claude_md_conflict_resolved_by_hand
 run_scenario "legacy fallback (no snapshot)"                    scenario_legacy_fallback
 run_scenario "--dry-run makes no writes"                        scenario_dry_run_no_writes
 run_scenario "adopt then upgrade merges (plain)"                scenario_adopt_then_upgrade_merges_plain
