@@ -641,7 +641,9 @@ so each block has four parts — `<<<<<<<` your version, `|||||||` the
 original base, `=======`, and `>>>>>>>` the incoming upstream version;
 delete the markers and the sections you don't want. On the next run
 domestique notices the resolved file (the `.new` is gone and the file
-changed) and advances its snapshot, reporting it under `Resolved`; deleting
+changed) and advances its snapshot, reporting it under `Resolved`; any
+upstream changes released since the conflict are merged in at the same
+time. Deleting
 the `.new` without changing the file conflicts again. An unresolved conflict
 writes only one `.bak`, however often you re-run.
 
