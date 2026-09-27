@@ -91,6 +91,10 @@ sed -i.orig \
 sed -i.orig \
   "s/Do not drain the queue unattended unless explicitly told to\\./Do not drain the queue unattended unless explicitly told to (v2-policy)./" \
   "$V2"
+# An upstream release carries a new version, so manifest assertions can tell v2 apart.
+sed -i.orig \
+  's/^DOMESTIQUE_VERSION="\([^"]*\)"/DOMESTIQUE_VERSION="\1-v2"/' \
+  "$V2"
 rm -f "$V2.orig"
 chmod +x "$V2"
 
@@ -275,6 +279,44 @@ scenario_merge_noop_reports_skipped() {
   check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
   check "user edit still present" grep -q "(user-edit)" "$t/$IMPL_REL"
   check "upstream edit still present" grep -q "(v2)" "$t/$IMPL_REL"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 4c: hand-edited-to-match upstream refreshes the stale base and the manifest
+# ---------------------------------------------------------------------------
+scenario_identical_refreshes_stale_base() {
+  local t="$WORKROOT/s4c"; mkdir -p "$t"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  # Hand-edit both live files so they already equal the v2 emit exactly
+  # (same sed expressions used to build v2.sh above).
+  sed -i.orig \
+    's/Blockers or decisions the orchestrator should know about/Blockers or decisions the orchestrator should know about (v2)/' \
+    "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig"
+  sed -i.orig \
+    "s/Do not drain the queue unattended unless explicitly told to\\./Do not drain the queue unattended unless explicitly told to (v2-policy)./" \
+    "$t/CLAUDE.md"
+  rm -f "$t/CLAUDE.md.orig"
+
+  local out rc
+  out="$("$V2" "$t" 2>&1)"; rc=$?
+
+  check "exit 0" test "$rc" -eq 0
+  check "reported implementer.md identical" bash -c 'printf "%s" "$1" | grep -q "implementer.md (identical)"' _ "$out"
+  check "reported CLAUDE.md block already current" bash -c 'printf "%s" "$1" | grep -q "CLAUDE.md (managed block already current)"' _ "$out"
+  check "base implementer.md refreshed to match live file" cmp -s "$t/$BASE_IMPL_REL" "$t/$IMPL_REL"
+  check "base implementer.md carries the v2 text" grep -q "(v2)" "$t/$BASE_IMPL_REL"
+  check "base CLAUDE.md block carries the v2-policy text" grep -q "(v2-policy)" "$t/$BASE_CLAUDE_BLOCK_REL"
+  check "manifest records the v2 version" grep -q '^domestique_version=.*-v2$' "$t/$MANIFEST_REL"
+  check "no .bak files" bash -c '! find "$1" -name "*.bak.*" | grep -q .' _ "$t"
+  check "no .new files" bash -c '! find "$1" -name "*.new" | grep -q .' _ "$t"
+
+  local hash_before hash_after
+  hash_before="$(treehash "$t")"
+  "$V2" "$t" >/dev/null 2>&1
+  hash_after="$(treehash "$t")"
+  check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
 }
 
 # ---------------------------------------------------------------------------
@@ -527,6 +569,7 @@ run_scenario "idempotent re-install"                            scenario_idempot
 run_scenario "upgrade, no local edits"                          scenario_upgrade_no_local_edits
 run_scenario "upgrade preserves a local edit (plain file)"      scenario_upgrade_preserves_local_edit_plain
 run_scenario "rerun after merge reports Skipped, no .bak"       scenario_merge_noop_reports_skipped
+run_scenario "identical file refreshes stale base + manifest"  scenario_identical_refreshes_stale_base
 run_scenario "conflict (plain file)"                            scenario_conflict_plain
 run_scenario "CLAUDE.md in-block edit preserved"                scenario_claude_md_inblock_preserved
 run_scenario "CLAUDE.md conflict"                               scenario_claude_md_conflict

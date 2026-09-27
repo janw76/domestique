@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.4"
+DOMESTIQUE_VERSION="0.3.5"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -835,7 +835,13 @@ write_codex_guest_ownership() {
 }
 
 write_provider_manifest() {
-  [ "$SNAPSHOT_TOUCHED" -eq 1 ] || return 0
+  local manifest="$SNAPSHOT_DIR/manifest" manifest_version=""
+  if [ "$SNAPSHOT_TOUCHED" -ne 1 ]; then
+    if [ -e "$manifest" ]; then
+      manifest_version="$(grep '^domestique_version=' "$manifest" | cut -d= -f2- || true)"
+      [ "$manifest_version" = "$DOMESTIQUE_VERSION" ] && return 0
+    fi
+  fi
   if [ "$DRY_RUN" -eq 1 ]; then
     note_dry "write/update manifest -> $SNAPSHOT_DIR/manifest"
   else
@@ -1145,14 +1151,13 @@ install_plain() {
   fi
 
   if cmp -s "$staged" "$dest"; then
-    # Identical to the fresh emit — no change needed, but if there's no base
-    # snapshot yet (legacy install), seed it now so future runs have a base
-    # to merge against.
+    # Identical to the fresh emit — no change needed, but refresh the base
+    # snapshot whenever it doesn't already match the fresh emit (covers both
+    # a missing base from a legacy install and a stale base left behind when
+    # the live file was hand-edited to match upstream before this run).
     local ident_basepath
     ident_basepath="$(rel_to_base "$dest")"
-    if [ ! -e "$ident_basepath" ]; then
-      snapshot_plain "$dest" "$staged"
-    fi
+    cmp -s "$staged" "$ident_basepath" || snapshot_plain "$dest" "$staged"
     SUM_SKIPPED+=("$dest (identical)")
     return 0
   fi
@@ -1405,6 +1410,10 @@ install_claude_md() {
             ' "$dest" > "$result"
 
             if cmp -s "$result" "$dest"; then
+              # Live file already matches the merged block — but refresh the
+              # block base whenever it doesn't already match the fresh emit
+              # (e.g. the block was hand-edited to match upstream).
+              cmp -s "$policybody" "$POLICY_SNAPSHOT" || snapshot_claude_block "$policybody"
               SUM_SKIPPED+=("$dest (managed block already current)")
               return 0
             fi
@@ -1482,11 +1491,11 @@ install_claude_md() {
 
   # Idempotency guard: if nothing would change, skip (no backup, no write).
   if cmp -s "$result" "$dest"; then
-    # Already current — but if there's no block base snapshot yet (legacy
-    # install), seed it now so future runs have a base to merge against.
-    if [ ! -e "$POLICY_SNAPSHOT" ]; then
-      snapshot_claude_block "$policybody"
-    fi
+    # Already current — but refresh the block base whenever it doesn't
+    # already match the fresh emit (covers both a missing base from a
+    # legacy install and a stale base left behind when the block was
+    # hand-edited to match upstream before this run).
+    cmp -s "$policybody" "$POLICY_SNAPSHOT" || snapshot_claude_block "$policybody"
     SUM_SKIPPED+=("$dest (managed block already current)")
     return 0
   fi

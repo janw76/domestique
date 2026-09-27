@@ -224,13 +224,20 @@ to merge.
 
 **Identical case:** if `ours` == `base` == `theirs` (nothing changed on
 either side), or `ours` == `theirs` (independently converged), skip as
-today — no write, no backup, snapshot may still be refreshed defensively
-though it's already correct. A clean 3-way merge whose result is
-byte-identical to `ours` (typically base == upstream, so the merge is a
-no-op) is likewise reported as **Skipped** ("local edits preserved, nothing
-to apply") and writes nothing: no file, no backup, and the base snapshot
-(and manifest) only when the base still lags upstream. A re-run after a
-successful merge therefore leaves the tree byte-identical.
+today — no write, no backup. The base snapshot is rewritten whenever it
+differs from the fresh emit, even here: a live file that was hand-edited to
+match upstream before the upgrade would otherwise leave a stale base behind
+forever (the base only ever advances when something looks like a change to
+write, and "identical" never looked like one). A clean 3-way merge whose
+result is byte-identical to `ours` (typically base == upstream, so the merge
+is a no-op) is likewise reported as **Skipped** ("local edits preserved,
+nothing to apply") and writes nothing: no file, no backup, and the base
+snapshot only when it still lags upstream. In both cases, the manifest is
+rewritten whenever the running script's `domestique_version` differs from
+the manifest's (or the manifest is missing), even if no managed file
+changed — so an upgrade that touches nothing but the version number is still
+recorded. A re-run after a successful merge, with base and manifest already
+current, therefore leaves the tree byte-identical.
 
 ---
 
