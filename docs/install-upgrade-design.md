@@ -192,6 +192,20 @@ rc=$?
   **conflict**, since it likely indicates a bad snapshot or environment
   problem worth surfacing differently.
 
+**Resolution detection:** on a conflict or error, the installer also writes
+a marker file `<base>.conflict` beside the base snapshot, holding the sha256
+of the live file at conflict time. On a later run, before merging, a file
+counts as resolved by hand when all three hold: `<dest>.new` is gone, the
+live file's sha256 differs from the marker, and the live file has no
+conflict-marker lines (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`). Then the
+base advances to `theirs`, the live file is left as is, and the file is
+reported under **Resolved** (exit 0). If the conflict recurs on a live file
+whose sha256 still matches the marker, `.new` is rewritten but no second
+`.bak` is taken. Any base advance (merge, identical refresh, `--force`,
+ADOPT, no-op skip) deletes the marker. Caveat: on a host with neither
+`sha256sum` nor `shasum` both hashes read `unavailable` and compare equal,
+so a resolution is never detected there.
+
 **No snapshot present for this file (legacy install, or file predates this
 feature) — ADOPT, don't clobber:**
 - **Identical file:** no change needed; seed the base snapshot from the
@@ -224,8 +238,20 @@ to merge.
 
 **Identical case:** if `ours` == `base` == `theirs` (nothing changed on
 either side), or `ours` == `theirs` (independently converged), skip as
-today — no write, no backup, snapshot may still be refreshed defensively
-though it's already correct.
+today — no write, no backup. The base snapshot is rewritten whenever it
+differs from the fresh emit, even here: a live file that was hand-edited to
+match upstream before the upgrade would otherwise leave a stale base behind
+forever (the base only ever advances when something looks like a change to
+write, and "identical" never looked like one). A clean 3-way merge whose
+result is byte-identical to `ours` (typically base == upstream, so the merge
+is a no-op) is likewise reported as **Skipped** ("local edits preserved,
+nothing to apply") and writes nothing: no file, no backup, and the base
+snapshot only when it still lags upstream. In both cases, the manifest is
+rewritten whenever the running script's `domestique_version` differs from
+the manifest's (or the manifest is missing), even if no managed file
+changed — so an upgrade that touches nothing but the version number is still
+recorded. A re-run after a successful merge, with base and manifest already
+current, therefore leaves the tree byte-identical.
 
 ---
 
@@ -266,6 +292,9 @@ block, adapted to *capture* it instead). `base-block` is
   Write the full file with the conflicted block spliced in (markers +
   conflict-marker'd body + preserved surrounding content) to
   `CLAUDE.md.new`. Warn, don't advance the snapshot, set non-zero exit.
+  Resolution detection and `.bak` dedupe apply to the block exactly as
+  described in §2, keyed on the sha256 of the whole live file and a marker
+  `<POLICY_DEST>.block.conflict` beside the block snapshot.
 - **No markers yet (Case C, first-time install of the block into an existing
   file) or no file at all (Case A):** unchanged from today — no merge is
   possible or needed since there's no prior `ours-block`; write/append as
