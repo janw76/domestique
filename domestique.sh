@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.6"
+DOMESTIQUE_VERSION="0.3.7"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -1059,7 +1059,7 @@ snapshot_plain() {
   mkdir -p "$(dirname "$basepath")"
   cp "$content" "$basepath"
   # Any base advance supersedes a recorded conflict.
-  rm -f "$basepath.conflict"
+  rm -f "$basepath.conflict" "$basepath.conflict.theirs"
 }
 
 # snapshot_claude_block <content-file>
@@ -1076,7 +1076,7 @@ snapshot_claude_block() {
   mkdir -p "$(dirname "$basepath")"
   cp "$content" "$basepath"
   # Any block base advance supersedes a recorded conflict.
-  rm -f "$basepath.conflict"
+  rm -f "$basepath.conflict" "$basepath.conflict.theirs"
 }
 
 # managed_files_list — provider inventory plus every sound managed policy
@@ -1207,29 +1207,33 @@ install_plain() {
 
   # A conflict marker (<base>.conflict, holding the live file's sha256 at
   # conflict time) plus: .new gone, live file changed, no conflict-marker
-  # lines -> the user resolved the conflict by hand. Accept it: advance the
-  # base to upstream, leave the live file as is.
+  # lines -> the user resolved the conflict by hand. Merge against the emit
+  # it was resolved against (<base>.conflict.theirs; the current emit when an
+  # older marker left none), so an upstream change released since still lands.
+  local resolved=0 mergebase="$basepath"
   if [ -e "$basepath.conflict" ] && [ ! -e "$dest.new" ] \
      && [ "$(file_sha256 "$dest")" != "$(cat "$basepath.conflict")" ] \
      && ! grep -qE '^(<{7}|>{7}|={7}|\|{7})( |$)' "$dest"; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      note_dry "resolve $dest (conflict resolved by hand; would advance base, leave file unchanged)"
-    else
-      snapshot_plain "$dest" "$staged"
-    fi
-    SUM_RESOLVED+=("$dest (conflict resolved by hand; base advanced, local edits preserved)")
-    return 0
+    resolved=1
+    mergebase="$basepath.conflict.theirs"
+    [ -e "$mergebase" ] || mergebase="$staged"
+    note_dry "resolve $dest (conflict resolved by hand; merging against the emit it was resolved against)"
   fi
 
-  # 3-way merge: ours=$dest, base=$basepath, theirs=$staged.
+  # 3-way merge: ours=$dest, base=$mergebase, theirs=$staged.
   local merged rc=0
   merged="$TMPDIR_WORK/merged"
   git merge-file -p --diff3 \
     -L "yours (local edits)" -L "base (last installed)" -L "upstream (new domestique)" \
-    "$dest" "$basepath" "$staged" > "$merged" || rc=$?
+    "$dest" "$mergebase" "$staged" > "$merged" || rc=$?
 
   if [ "$rc" -eq 0 ]; then
     if cmp -s "$merged" "$dest"; then
+      if [ "$resolved" -eq 1 ]; then
+        SUM_RESOLVED+=("$dest (conflict resolved by hand; base advanced, local edits preserved)")
+        snapshot_plain "$dest" "$staged"
+        return 0
+      fi
       if [ "$DRY_RUN" -eq 1 ]; then
         note_dry "skip $dest (merge result identical to the live file; local edits preserved)"
       fi
@@ -1244,7 +1248,11 @@ install_plain() {
     else
       cp "$merged" "$dest"
     fi
-    SUM_MERGED+=("$dest")
+    if [ "$resolved" -eq 1 ]; then
+      SUM_RESOLVED+=("$dest (conflict resolved by hand; newer upstream merged in)")
+    else
+      SUM_MERGED+=("$dest")
+    fi
     snapshot_plain "$dest" "$staged"
     return 0
   fi
@@ -1264,9 +1272,9 @@ install_plain() {
   fi
   if [ "$DRY_RUN" -eq 1 ]; then
     if [ -e "$marker" ] && [ "$(cat "$marker")" = "$ours_sha" ]; then
-      note_dry "merge $dest ($kind) — would write $newfile, skip backup (unchanged since the last conflict), record $marker, leave $dest untouched"
+      note_dry "merge $dest ($kind) — would write $newfile, skip backup (unchanged since the last conflict), record $marker and $marker.theirs, leave $dest untouched"
     else
-      note_dry "merge $dest ($kind) — would write $newfile, back up $dest -> $backup, record $marker, leave $dest untouched"
+      note_dry "merge $dest ($kind) — would write $newfile, back up $dest -> $backup, record $marker and $marker.theirs, leave $dest untouched"
     fi
   else
     cp "$merged" "$newfile"
@@ -1277,6 +1285,7 @@ install_plain() {
       SUM_BACKEDUP+=("$backup")
     fi
     printf '%s\n' "$ours_sha" > "$marker"
+    cp "$staged" "$marker.theirs"
   fi
   SUM_CONFLICT+=("$dest ($kind; see $newfile)")
 }
@@ -1430,27 +1439,26 @@ install_claude_md() {
           # A conflict marker ($basepath.conflict, holding the live file's
           # sha256 at conflict time) plus: dest.new gone, live file changed,
           # no conflict-marker lines -> the user resolved the conflict by
-          # hand. Accept it: advance the block base to upstream, leave the
-          # live file as is.
+          # hand. Merge against the body it was resolved against
+          # ($basepath.conflict.theirs; the current emit when an older marker
+          # left none), so an upstream change released since still lands.
+          local resolved=0 mergebase="$basepath"
           if [ -e "$basepath.conflict" ] && [ ! -e "$dest.new" ] \
              && [ "$(file_sha256 "$dest")" != "$(cat "$basepath.conflict")" ] \
              && ! grep -qE '^(<{7}|>{7}|={7}|\|{7})( |$)' "$dest"; then
-            if [ "$DRY_RUN" -eq 1 ]; then
-              note_dry "resolve $dest block (conflict resolved by hand; would advance base, leave file unchanged)"
-            else
-              snapshot_claude_block "$policybody"
-            fi
-            SUM_RESOLVED+=("$dest ($POLICY_LABEL block: conflict resolved by hand; base advanced, local edits preserved)")
-            return 0
+            resolved=1
+            mergebase="$basepath.conflict.theirs"
+            [ -e "$mergebase" ] || mergebase="$policybody"
+            note_dry "resolve $dest block (conflict resolved by hand; merging against the emit it was resolved against)"
           fi
 
-          # 3-way merge the block body: ours=$oursblock, base=$basepath,
+          # 3-way merge the block body: ours=$oursblock, base=$mergebase,
           # theirs=$policybody.
           local mergedblock rc=0
           mergedblock="$TMPDIR_WORK/mergedblock"
           git merge-file -p --diff3 \
             -L "yours (local edits)" -L "base (last installed)" -L "upstream (new domestique)" \
-            "$oursblock" "$basepath" "$policybody" > "$mergedblock" || rc=$?
+            "$oursblock" "$mergebase" "$policybody" > "$mergedblock" || rc=$?
 
           if [ "$rc" -eq 0 ]; then
             # Clean merge: splice the merged block body back between fresh
@@ -1464,6 +1472,11 @@ install_claude_md() {
             ' "$dest" > "$result"
 
             if cmp -s "$result" "$dest"; then
+              if [ "$resolved" -eq 1 ]; then
+                SUM_RESOLVED+=("$dest ($POLICY_LABEL block: conflict resolved by hand; base advanced, local edits preserved)")
+                snapshot_claude_block "$policybody"
+                return 0
+              fi
               # Live file already matches the merged block — but refresh the
               # block base whenever it doesn't already match the fresh emit
               # (e.g. the block was hand-edited to match upstream).
@@ -1480,7 +1493,11 @@ install_claude_md() {
               cp "$result" "$dest"
             fi
             SUM_BACKEDUP+=("$backup")
-            SUM_MERGED+=("$dest ($POLICY_LABEL block)")
+            if [ "$resolved" -eq 1 ]; then
+              SUM_RESOLVED+=("$dest ($POLICY_LABEL block: conflict resolved by hand; newer upstream merged in)")
+            else
+              SUM_MERGED+=("$dest ($POLICY_LABEL block)")
+            fi
             snapshot_claude_block "$policybody"
             return 0
           fi
@@ -1511,9 +1528,9 @@ install_claude_md() {
 
           if [ "$DRY_RUN" -eq 1 ]; then
             if [ -e "$marker" ] && [ "$(cat "$marker")" = "$ours_sha" ]; then
-              note_dry "merge $dest block ($kind) — would write $newfile, skip backup (unchanged since the last conflict), record $marker, leave $dest untouched"
+              note_dry "merge $dest block ($kind) — would write $newfile, skip backup (unchanged since the last conflict), record $marker and $marker.theirs, leave $dest untouched"
             else
-              note_dry "merge $dest block ($kind) — would write $newfile, back up $dest -> $backup2, record $marker, leave $dest untouched"
+              note_dry "merge $dest block ($kind) — would write $newfile, back up $dest -> $backup2, record $marker and $marker.theirs, leave $dest untouched"
             fi
           else
             cp "$conflictresult" "$newfile"
@@ -1524,6 +1541,7 @@ install_claude_md() {
               SUM_BACKEDUP+=("$backup2")
             fi
             printf '%s\n' "$ours_sha" > "$marker"
+            cp "$policybody" "$marker.theirs"
           fi
           SUM_CONFLICT+=("$dest ($kind; see $newfile)")
           return 0

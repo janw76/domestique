@@ -99,6 +99,26 @@ rm -f "$V2.orig"
 chmod +x "$V2"
 
 # ---------------------------------------------------------------------------
+# v3.sh — a further upstream release on top of v2.sh, used to prove that a
+# conflict resolved by hand against v2 still receives v3's changes. Each
+# edit touches a line that merges cleanly against the scenario 5 / 7
+# conflicting edits (not adjacent to them).
+# ---------------------------------------------------------------------------
+V3="$WORKROOT/v3.sh"
+cp "$V2" "$V3"
+sed -i.orig \
+  's/Surface these to the orchestrator instead\./Surface these to the orchestrator instead. (v3)/' \
+  "$V3"
+sed -i.orig \
+  's/so a MEMORY\.md file would be lost\./so a MEMORY.md file would be lost. (v3-policy)/' \
+  "$V3"
+sed -i.orig \
+  's/^DOMESTIQUE_VERSION="\([^"]*\)"/DOMESTIQUE_VERSION="\1-v3"/' \
+  "$V3"
+rm -f "$V3.orig"
+chmod +x "$V3"
+
+# ---------------------------------------------------------------------------
 # v0.sh — a modified copy of domestique.sh simulating an OLDER upstream
 # version than the one under test, used only to construct a "predates the
 # emitter change" legacy install: a file whose pristine content differs from
@@ -422,6 +442,51 @@ scenario_conflict_resolved_by_hand() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario 5c: conflict resolved by hand at v2, then upgrade to v3 — the
+# resolution run merges against the v2 emit it was resolved against, so v3's
+# change lands alongside the hand resolution.
+# ---------------------------------------------------------------------------
+scenario_resolved_then_newer_upstream_plain() {
+  local t="$WORKROOT/s5c" ref2="$WORKROOT/s5c-ref2" ref3="$WORKROOT/s5c-ref3"
+  mkdir -p "$t" "$ref2" "$ref3"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  sed -i.orig \
+    's/Blockers or decisions the orchestrator should know about/Blockers or decisions the orchestrator should know about (conflicting-user-edit)/' \
+    "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig"
+
+  local rc out
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+  check "conflict run exit 3" test "$rc" -eq 3
+
+  "$V2" "$ref2" >/dev/null 2>&1
+  cp "$ref2/$IMPL_REL" "$t/$IMPL_REL"
+  sed -i.orig '/(v2)/s/$/ (conflicting-user-edit)/' "$t/$IMPL_REL"
+  rm -f "$t/$IMPL_REL.orig" "$t/$IMPL_REL.new"
+
+  "$V3" "$ref3" >/dev/null 2>&1
+  out="$("$V3" "$t" 2>&1)"; rc=$?
+  check "exit 0" test "$rc" -eq 0
+  check "Resolved group reported" bash -c 'printf "%s" "$1" | grep -q "Resolved:"' _ "$out"
+  check "reported newer upstream merged in" bash -c 'printf "%s" "$1" | grep -q "newer upstream merged in"' _ "$out"
+  check "live file keeps (v2)" grep -q "(v2)" "$t/$IMPL_REL"
+  check "live file keeps the hand resolution" grep -q "(conflicting-user-edit)" "$t/$IMPL_REL"
+  check "live file carries (v3)" grep -q "(v3)" "$t/$IMPL_REL"
+  check "base equals the fresh v3 emit" cmp -s "$t/$BASE_IMPL_REL" "$ref3/$IMPL_REL"
+  check "marker removed" test ! -e "$t/$BASE_IMPL_REL.conflict"
+  check "theirs removed" test ! -e "$t/$BASE_IMPL_REL.conflict.theirs"
+  check "no .new" test ! -e "$t/$IMPL_REL.new"
+
+  local hash_before hash_after
+  hash_before="$(treehash "$t")"
+  out="$("$V3" "$t" 2>&1)"
+  hash_after="$(treehash "$t")"
+  check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
+  check "rerun reported as Skipped (local edits preserved)" bash -c 'printf "%s" "$1" | grep -q "(local edits preserved, nothing to apply)"' _ "$out"
+}
+
+# ---------------------------------------------------------------------------
 # Scenario 6: CLAUDE.md in-block edit preserved + outside-marker edit intact
 # ---------------------------------------------------------------------------
 scenario_claude_md_inblock_preserved() {
@@ -544,6 +609,50 @@ scenario_claude_md_conflict_resolved_by_hand() {
   local hash_before hash_after
   hash_before="$(treehash "$t")"
   out="$("$V2" "$t" 2>&1)"
+  hash_after="$(treehash "$t")"
+  check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
+  check "rerun reported as managed block already current" bash -c 'printf "%s" "$1" | grep -q "(managed block already current)"' _ "$out"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 7c: CLAUDE.md block conflict resolved by hand at v2, then upgrade
+# to v3 — v3's policy change lands alongside the hand resolution.
+# ---------------------------------------------------------------------------
+scenario_resolved_then_newer_upstream_claude_md() {
+  local t="$WORKROOT/s7c" ref2="$WORKROOT/s7c-ref2" ref3="$WORKROOT/s7c-ref3"
+  mkdir -p "$t" "$ref2" "$ref3"
+  "$DOM" "$t" >/dev/null 2>&1
+
+  sed -i.orig \
+    "s/Do not drain the queue unattended unless explicitly told to\\./Do not drain the queue unattended unless explicitly told to (conflicting-edit)./" \
+    "$t/$CLAUDE_REL"
+  rm -f "$t/$CLAUDE_REL.orig"
+
+  local rc out
+  "$V2" "$t" >/dev/null 2>&1; rc=$?
+  check "conflict run exit 3" test "$rc" -eq 3
+
+  "$V2" "$ref2" >/dev/null 2>&1
+  cp "$ref2/$CLAUDE_REL" "$t/$CLAUDE_REL"
+  sed -i.orig '/(v2-policy)/s/$/ (conflicting-edit)/' "$t/$CLAUDE_REL"
+  rm -f "$t/$CLAUDE_REL.orig" "$t/$CLAUDE_REL.new"
+
+  "$V3" "$ref3" >/dev/null 2>&1
+  out="$("$V3" "$t" 2>&1)"; rc=$?
+  check "exit 0" test "$rc" -eq 0
+  check "Resolved group reported" bash -c 'printf "%s" "$1" | grep -q "Resolved:"' _ "$out"
+  check "reported newer upstream merged in" bash -c 'printf "%s" "$1" | grep "CLAUDE.md" | grep -q "newer upstream merged in"' _ "$out"
+  check "live CLAUDE.md keeps (v2-policy)" grep -q "(v2-policy)" "$t/$CLAUDE_REL"
+  check "live CLAUDE.md keeps the hand resolution" grep -q "(conflicting-edit)" "$t/$CLAUDE_REL"
+  check "live CLAUDE.md carries (v3-policy)" grep -q "(v3-policy)" "$t/$CLAUDE_REL"
+  check "block base equals the fresh v3 emit" cmp -s "$t/$BASE_CLAUDE_BLOCK_REL" "$ref3/$BASE_CLAUDE_BLOCK_REL"
+  check "marker removed" test ! -e "$t/$BASE_CLAUDE_BLOCK_REL.conflict"
+  check "theirs removed" test ! -e "$t/$BASE_CLAUDE_BLOCK_REL.conflict.theirs"
+  check "no CLAUDE.md.new" test ! -e "$t/$CLAUDE_REL.new"
+
+  local hash_before hash_after
+  hash_before="$(treehash "$t")"
+  out="$("$V3" "$t" 2>&1)"
   hash_after="$(treehash "$t")"
   check "tree byte-identical across the rerun" test "$hash_before" = "$hash_after"
   check "rerun reported as managed block already current" bash -c 'printf "%s" "$1" | grep -q "(managed block already current)"' _ "$out"
@@ -731,10 +840,12 @@ run_scenario "identical file refreshes stale base + manifest"  scenario_identica
 run_scenario "conflict (plain file)"                            scenario_conflict_plain
 run_scenario "conflict rerun: still conflicts, one .bak, marker kept" scenario_conflict_rerun_still_conflicts
 run_scenario "hand-resolved conflict advances the base"         scenario_conflict_resolved_by_hand
+run_scenario "hand-resolved at v2, upgrade to v3 merges v3"      scenario_resolved_then_newer_upstream_plain
 run_scenario "CLAUDE.md in-block edit preserved"                scenario_claude_md_inblock_preserved
 run_scenario "CLAUDE.md conflict"                               scenario_claude_md_conflict
 run_scenario "CLAUDE.md conflict rerun: one .bak, marker kept"  scenario_claude_md_conflict_rerun_dedupes_bak
 run_scenario "hand-resolved CLAUDE.md conflict advances the block base" scenario_claude_md_conflict_resolved_by_hand
+run_scenario "hand-resolved CLAUDE.md at v2, upgrade to v3 merges v3" scenario_resolved_then_newer_upstream_claude_md
 run_scenario "legacy fallback (no snapshot)"                    scenario_legacy_fallback
 run_scenario "--dry-run makes no writes"                        scenario_dry_run_no_writes
 run_scenario "adopt then upgrade merges (plain)"                scenario_adopt_then_upgrade_merges_plain
