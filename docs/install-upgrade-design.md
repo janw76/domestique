@@ -292,6 +292,9 @@ block, adapted to *capture* it instead). `base-block` is
   Write the full file with the conflicted block spliced in (markers +
   conflict-marker'd body + preserved surrounding content) to
   `CLAUDE.md.new`. Warn, don't advance the snapshot, set non-zero exit.
+  Resolution detection and `.bak` dedupe apply to the block exactly as
+  described in §2, keyed on the sha256 of the whole live file and a marker
+  `<POLICY_DEST>.block.conflict` beside the block snapshot.
 - **No markers yet (Case C, first-time install of the block into an existing
   file) or no file at all (Case A):** unchanged from today — no merge is
   possible or needed since there's no prior `ours-block`; write/append as

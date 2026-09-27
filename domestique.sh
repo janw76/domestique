@@ -1075,6 +1075,8 @@ snapshot_claude_block() {
   fi
   mkdir -p "$(dirname "$basepath")"
   cp "$content" "$basepath"
+  # Any block base advance supersedes a recorded conflict.
+  rm -f "$basepath.conflict"
 }
 
 # managed_files_list — provider inventory plus every sound managed policy
@@ -1425,6 +1427,23 @@ install_claude_md() {
       else
         local basepath="$POLICY_SNAPSHOT"
         if [ -e "$basepath" ]; then
+          # A conflict marker ($basepath.conflict, holding the live file's
+          # sha256 at conflict time) plus: dest.new gone, live file changed,
+          # no conflict-marker lines -> the user resolved the conflict by
+          # hand. Accept it: advance the block base to upstream, leave the
+          # live file as is.
+          if [ -e "$basepath.conflict" ] && [ ! -e "$dest.new" ] \
+             && [ "$(file_sha256 "$dest")" != "$(cat "$basepath.conflict")" ] \
+             && ! grep -qE '^(<{7}|>{7}|={7}|\|{7})( |$)' "$dest"; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+              note_dry "resolve $dest block (conflict resolved by hand; would advance base, leave file unchanged)"
+            else
+              snapshot_claude_block "$policybody"
+            fi
+            SUM_RESOLVED+=("$dest ($POLICY_LABEL block: conflict resolved by hand; base advanced, local edits preserved)")
+            return 0
+          fi
+
           # 3-way merge the block body: ours=$oursblock, base=$basepath,
           # theirs=$policybody.
           local mergedblock rc=0
@@ -1472,6 +1491,8 @@ install_claude_md() {
           # up the current live file, force a non-zero exit for the run.
           CONFLICT_OCCURRED=1
           local newfile="$dest.new" backup2="$dest.bak.$TS" kind="conflict"
+          local marker="$basepath.conflict" ours_sha
+          ours_sha="$(file_sha256 "$dest")"
           if [ "$rc" -ge 128 ]; then
             kind="error"
             echo "Error: git merge-file failed unexpectedly for $dest block (exit $rc)." >&2
@@ -1489,11 +1510,20 @@ install_claude_md() {
           ' "$dest" > "$conflictresult"
 
           if [ "$DRY_RUN" -eq 1 ]; then
-            note_dry "merge $dest block ($kind) — would write $newfile, back up $dest -> $backup2, leave $dest untouched"
+            if [ -e "$marker" ] && [ "$(cat "$marker")" = "$ours_sha" ]; then
+              note_dry "merge $dest block ($kind) — would write $newfile, skip backup (unchanged since the last conflict), record $marker, leave $dest untouched"
+            else
+              note_dry "merge $dest block ($kind) — would write $newfile, back up $dest -> $backup2, record $marker, leave $dest untouched"
+            fi
           else
             cp "$conflictresult" "$newfile"
-            cp "$dest" "$backup2"
-            SUM_BACKEDUP+=("$backup2")
+            # One .bak per distinct live file: skip it when the file is
+            # unchanged since the conflict already recorded in $marker.
+            if [ ! -e "$marker" ] || [ "$(cat "$marker")" != "$ours_sha" ]; then
+              cp "$dest" "$backup2"
+              SUM_BACKEDUP+=("$backup2")
+            fi
+            printf '%s\n' "$ours_sha" > "$marker"
           fi
           SUM_CONFLICT+=("$dest ($kind; see $newfile)")
           return 0
