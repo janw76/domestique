@@ -192,6 +192,20 @@ rc=$?
   **conflict**, since it likely indicates a bad snapshot or environment
   problem worth surfacing differently.
 
+**Resolution detection:** on a conflict or error, the installer also writes
+a marker file `<base>.conflict` beside the base snapshot, holding the sha256
+of the live file at conflict time. On a later run, before merging, a file
+counts as resolved by hand when all three hold: `<dest>.new` is gone, the
+live file's sha256 differs from the marker, and the live file has no
+conflict-marker lines (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`). Then the
+base advances to `theirs`, the live file is left as is, and the file is
+reported under **Resolved** (exit 0). If the conflict recurs on a live file
+whose sha256 still matches the marker, `.new` is rewritten but no second
+`.bak` is taken. Any base advance (merge, identical refresh, `--force`,
+ADOPT, no-op skip) deletes the marker. Caveat: on a host with neither
+`sha256sum` nor `shasum` both hashes read `unavailable` and compare equal,
+so a resolution is never detected there.
+
 **No snapshot present for this file (legacy install, or file predates this
 feature) — ADOPT, don't clobber:**
 - **Identical file:** no change needed; seed the base snapshot from the

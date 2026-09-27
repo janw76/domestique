@@ -639,7 +639,11 @@ the result over the live file, then delete the `.new`. Re-run the installer
 once you're done to refresh the snapshot. The conflicts use `diff3` style,
 so each block has four parts — `<<<<<<<` your version, `|||||||` the
 original base, `=======`, and `>>>>>>>` the incoming upstream version;
-delete the markers and the sections you don't want.
+delete the markers and the sections you don't want. On the next run
+domestique notices the resolved file (the `.new` is gone and the file
+changed) and advances its snapshot, reporting it under `Resolved`; deleting
+the `.new` without changing the file conflicts again. An unresolved conflict
+writes only one `.bak`, however often you re-run.
 
 **Policy-file specifics.** Only the managed block (between the
 `<!-- BEGIN domestique (managed) -->` / `<!-- END domestique -->` markers) is
@@ -727,7 +731,7 @@ mixed-platform state, Beads routing, and uninstall. They require only a shell
 and `git` (plus any suite-specific fake command fixtures):
 
 ```sh
-bash test/upgrade.sh     # 12 scenarios: fresh install, merges, conflicts, adopt
+bash test/upgrade.sh     # 16 scenarios: fresh install, merges, conflicts, adopt
 bash test/guest.sh       # 14 scenarios: --guest, sticky mode, --no-guest, worktrees
 bash test/uninstall.sh   # 23 scenarios: --uninstall, --purge-beads, round-trip, marker refusals
 bash test/codex.sh       # 17 scenarios: Codex, platforms, guest, Beads, updater, uninstall
