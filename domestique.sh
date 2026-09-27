@@ -5,7 +5,7 @@
 # so the script is still self-contained after it has been fetched.
 set -euo pipefail
 
-DOMESTIQUE_VERSION="0.3.3"
+DOMESTIQUE_VERSION="0.3.4"
 
 MARKER_BEGIN='<!-- BEGIN domestique (managed) -->'
 MARKER_END='<!-- END domestique -->'
@@ -1115,6 +1115,9 @@ write_manifest() {
 #   - base snapshot exists -> 3-way merge (git merge-file); clean merge
 #     overwrites dest and advances the snapshot; conflict/error leaves dest
 #     untouched, writes dest.new + a .bak, and does not advance the snapshot.
+#     A clean merge whose result is byte-identical to the live file is
+#     reported as Skipped and writes nothing; the snapshot advances only if
+#     it still lags upstream.
 #   - no base snapshot (legacy/pre-snapshot install) -> ADOPT: seed the base
 #     snapshot from the PRISTINE freshly-emitted content (not the edited
 #     on-disk file), leave the live file unchanged (no .bak, no overwrite).
@@ -1195,6 +1198,16 @@ install_plain() {
     "$dest" "$basepath" "$staged" > "$merged" || rc=$?
 
   if [ "$rc" -eq 0 ]; then
+    if cmp -s "$merged" "$dest"; then
+      if [ "$DRY_RUN" -eq 1 ]; then
+        note_dry "skip $dest (merge result identical to the live file; local edits preserved)"
+      fi
+      SUM_SKIPPED+=("$dest (local edits preserved, nothing to apply)")
+      # Advance the base only if it still lags upstream; the common no-op case
+      # (base == upstream) writes nothing, not even the manifest.
+      cmp -s "$staged" "$basepath" || snapshot_plain "$dest" "$staged"
+      return 0
+    fi
     if [ "$DRY_RUN" -eq 1 ]; then
       note_dry "merge $dest (clean)"
     else
